@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react'
-import { apiGet, apiPost } from '../../api.js'
+import React, { useEffect, useRef, useState } from 'react'
+import { apiGet, apiPost, API_BASE } from '../../api.js'
+import io from 'socket.io-client'
 
 export default function WhatsAppConnect(){
   const [status,setStatus]=useState({connected:false})
@@ -7,6 +8,10 @@ export default function WhatsAppConnect(){
   const [loading,setLoading]=useState(false)
   const [polling,setPolling]=useState(false)
   const [updatedAt, setUpdatedAt] = useState(null)
+  const socketRef = useRef(null)
+  const pollTimerRef = useRef(null)
+  const backoffRef = useRef(4000) // fallback poll interval
+  const lastQrAtRef = useRef(0)
 
   async function loadStatus(){
     try{ const st = await apiGet('/api/wa/status'); setStatus(st); setUpdatedAt(new Date().toISOString()) }catch(_e){}
@@ -46,23 +51,77 @@ export default function WhatsAppConnect(){
 
   useEffect(()=>{ loadStatus() },[])
 
+  // Create a Socket.IO connection for live status/QR to avoid aggressive polling
   useEffect(()=>{
-    if(!polling) return
-    const id = setInterval(async ()=>{
-      try{
-        const st = await apiGet('/api/wa/status')
-        setStatus(st)
-        if(!st.connected){
+    const socket = io(API_BASE, {
+      transports: ['websocket', 'polling'],
+      withCredentials: true,
+      path: '/socket.io',
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 800,
+      reconnectionDelayMax: 5000,
+    })
+    socketRef.current = socket
+    socket.on('status', (st)=>{
+      try{ setStatus(st); setUpdatedAt(new Date().toISOString()) }catch{}
+      if (st?.connected){ setQr(null); setPolling(false) }
+    })
+    socket.on('qr', ({ qr })=>{
+      try{ setQr(qr); lastQrAtRef.current = Date.now() }catch{}
+    })
+    socket.on('connect_error', ()=>{
+      // fallback to gentle polling if socket cannot connect
+      schedulePollSoon(3000)
+    })
+    return ()=>{ try{ socket.disconnect() }catch{}; socketRef.current = null }
+  }, [])
+
+  function clearPoll(){ if (pollTimerRef.current){ clearTimeout(pollTimerRef.current); pollTimerRef.current = null } }
+  function schedulePollSoon(ms){ clearPoll(); pollTimerRef.current = setTimeout(pollOnce, ms) }
+  async function pollOnce(){
+    const hidden = (()=>{ try{ return document.hidden || !document.hasFocus() }catch{ return false } })()
+    if (hidden){ backoffRef.current = Math.max(backoffRef.current||4000, 10000) }
+    try{
+      const st = await apiGet('/api/wa/status')
+      setStatus(st); setUpdatedAt(new Date().toISOString())
+      if(!st.connected){
+        // Only fetch QR if we don't have one or it is older than ~20s
+        const now = Date.now()
+        if (!qr || (now - (lastQrAtRef.current||0) > 20000)){
           const qrRes = await apiGet('/api/wa/qr')
-          setQr(qrRes.qr)
-        } else {
-          setQr(null)
-          setPolling(false)
+          setQr(qrRes.qr || null)
+          lastQrAtRef.current = Date.now()
         }
-      }catch(_e){}
-    }, 2000)
-    return ()=> clearInterval(id)
-  },[polling])
+        backoffRef.current = 4000
+      } else {
+        setQr(null)
+        setPolling(false)
+        backoffRef.current = 8000
+      }
+    }catch(e){
+      // Respect server/WAF signals
+      if (typeof e?.retryAfterMs === 'number' && e.retryAfterMs > 0){
+        backoffRef.current = Math.min(Math.max(e.retryAfterMs, 5000), 20000)
+      } else if (e?.status === 429 || e?.status === 503){
+        backoffRef.current = Math.min((backoffRef.current||4000) * 2, 20000)
+      } else {
+        backoffRef.current = Math.min((backoffRef.current||4000) * 2, 15000)
+      }
+    } finally {
+      const connected = !!(socketRef.current && socketRef.current.connected)
+      if (!connected && polling){ schedulePollSoon(backoffRef.current || 4000) }
+    }
+  }
+
+  // Start/stop fallback polling based on 'polling' state and socket connectivity
+  useEffect(()=>{
+    clearPoll()
+    if (!polling) return
+    const connected = !!(socketRef.current && socketRef.current.connected)
+    if (!connected){ schedulePollSoon(500) }
+    return ()=> clearPoll()
+  }, [polling])
 
   return (
     <div>
