@@ -6,6 +6,7 @@ import http from 'http';
 import { connectDB } from './modules/config/db.js';
 import mongoose from 'mongoose';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { initSocket } from './modules/config/socket.js';
 import productsRoutes from './modules/routes/products.js';
@@ -88,21 +89,43 @@ app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
 
 // Serve frontend static build if available (single-server deploy)
 // Set SERVE_STATIC=false in env to disable.
-const clientDist = path.resolve(process.cwd(), '../frontend/dist');
-const indexHtml = path.join(clientDist, 'index.html');
+let CLIENT_DIST = null;
+let INDEX_HTML = null;
 try {
   const serveStatic = process.env.SERVE_STATIC !== 'false';
-  if (serveStatic && fs.existsSync(indexHtml)) {
-    app.use(express.static(clientDist));
-    console.log('Serving frontend from:', clientDist);
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  const candidates = [
+    path.resolve(process.cwd(), '../frontend/dist'),
+    path.resolve(process.cwd(), 'frontend/dist'),
+    path.resolve(__dirname, '../../frontend/dist'),
+    path.resolve('/app/frontend/dist'),
+  ];
+  for (const c of candidates){
+    try{
+      const idx = path.join(c, 'index.html');
+      if (fs.existsSync(idx)) { CLIENT_DIST = c; INDEX_HTML = idx; break; }
+    }catch{}
+  }
+  if (serveStatic && CLIENT_DIST && INDEX_HTML){
+    app.use(express.static(CLIENT_DIST));
+    console.log('Serving frontend from:', CLIENT_DIST);
   } else if (!serveStatic) {
     console.log('Static serving disabled via SERVE_STATIC=false');
   } else {
-    console.warn('Frontend dist not found, SPA will not be served:', indexHtml);
+    console.warn('Frontend dist not found, SPA will not be served. Checked:', candidates);
   }
 } catch (e) {
   console.warn('Static serve setup skipped:', e?.message || e);
 }
+
+// Serve PWA manifest and favicons directly from dist root if available
+app.get(['/manifest.webmanifest','/favicon.svg','/favicon.ico'], (req, res, next) => {
+  if (!INDEX_HTML || !CLIENT_DIST) return next();
+  const f = path.join(CLIENT_DIST, req.path.replace('..',''));
+  if (fs.existsSync(f)) return res.sendFile(f);
+  return next();
+});
 
 // SPA fallback: let client router handle 404s (but do NOT intercept API, Socket.IO, or upload paths)
 app.get('*', (req, res, next) => {
@@ -112,7 +135,7 @@ app.get('*', (req, res, next) => {
     if (p.startsWith('/socket.io')) return next();
     if (p.startsWith('/uploads')) return next();
     if (p.startsWith('/assets/')) return next();
-    if (fs.existsSync(indexHtml)) return res.sendFile(indexHtml);
+    if (INDEX_HTML && fs.existsSync(INDEX_HTML)) return res.sendFile(INDEX_HTML);
     return next();
   } catch {
     return next();
