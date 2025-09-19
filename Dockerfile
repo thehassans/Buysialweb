@@ -4,7 +4,7 @@
 # --------------------
 # Stage 1: Build frontend
 # --------------------
-FROM node:18-alpine AS frontend_builder
+FROM node:20-bookworm-slim AS frontend_builder
 WORKDIR /app/frontend
 # Install deps first for better caching
 COPY frontend/package*.json ./
@@ -16,7 +16,7 @@ RUN npm run build
 # --------------------
 # Stage 2: Install backend production deps
 # --------------------
-FROM node:18-alpine AS backend_deps
+FROM node:20-bookworm-slim AS backend_deps
 WORKDIR /app/backend
 COPY backend/package*.json ./
 # Install only production dependencies
@@ -25,7 +25,7 @@ RUN npm ci --omit=dev
 # --------------------
 # Stage 3: Final runtime
 # --------------------
-FROM node:18-alpine AS runner
+FROM node:20-bookworm-slim AS runner
 # Create app directories
 WORKDIR /app
 
