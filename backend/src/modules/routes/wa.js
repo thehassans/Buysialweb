@@ -251,30 +251,36 @@ router.get('/messages', auth, async (req, res) => {
 
 // Send text message
 router.post('/send-text', auth, async (req, res) => {
-  const waService = await getWaService();
-  const { jid, text } = req.body || {};
-  if (!jid || !text) return res.status(400).json({ error: 'jid and text required' });
-  if (req.user?.role === 'agent') {
-    const meta = await ChatMeta.findOne({ jid, assignedTo: req.user.id });
-    if (!meta) return res.status(403).json({ error: 'Not allowed for this chat' });
-  }
   try{
-    const r = await waService.sendText(jid, text);
-    res.json(r);
-  }catch(err){
-    const msg = String(err?.message || 'failed');
-    const isClientErr = (
-      msg.includes('wa-not-connected') ||
-      msg.includes('invalid-jid') ||
-      msg.includes('wa-number-not-registered') ||
-      msg.startsWith('send-failed:') ||
-      msg.startsWith('send-transient:')
-    );
-    const code = isClientErr ? 400 : 500;
-    try{ console.error('[send-text] error', { jid, msg, code }) }catch{}
-    const body = { error: msg };
-    if (msg.startsWith('send-transient:')) body.transient = true;
-    res.status(code).json(body);
+    const waService = await getWaService();
+    const { jid, text } = req.body || {};
+    if (!jid || !text) return res.status(400).json({ error: 'jid and text required' });
+    if (req.user?.role === 'agent') {
+      const meta = await ChatMeta.findOne({ jid, assignedTo: req.user.id });
+      if (!meta) return res.status(403).json({ error: 'Not allowed for this chat' });
+    }
+    try{
+      const r = await waService.sendText(jid, text);
+      res.json(r);
+    }catch(err){
+      const msg = String(err?.message || 'failed');
+      const isClientErr = (
+        msg.includes('wa-not-connected') ||
+        msg.includes('invalid-jid') ||
+        msg.includes('wa-number-not-registered') ||
+        msg.startsWith('send-failed:') ||
+        msg.startsWith('send-transient:')
+      );
+      const code = isClientErr ? 400 : 500;
+      try{ console.error('[send-text] error', { jid, msg, code }) }catch{}
+      const body = { error: msg };
+      if (msg.startsWith('send-transient:')) body.transient = true;
+      res.status(code).json(body);
+    }
+  }catch(outerErr){
+    const msg = String(outerErr?.message || 'failed');
+    try{ console.error('[send-text] outer error', { msg }) }catch{}
+    return res.status(500).json({ error: `send-transient:${msg}` });
   }
 });
 

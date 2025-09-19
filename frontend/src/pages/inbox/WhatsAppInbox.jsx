@@ -613,6 +613,11 @@ export default function WhatsAppInbox(){
           await new Promise(r => setTimeout(r, 1800))
           return trySend(1)
         }
+        if (/Internal server error/i.test(msg) && attempt === 0){
+          // Treat a 500 from send-text as transient once
+          await new Promise(r => setTimeout(r, 1800))
+          return trySend(1)
+        }
         if (/403/.test(msg)){
           alert('Not allowed to send to this chat. If you are an agent, make sure the chat is assigned to you.')
           return false
