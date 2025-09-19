@@ -262,6 +262,8 @@ router.get('/media', auth, async (req, res) => {
   const m = await waService.getMedia(jid, id);
   if (!m) return res.status(404).json({ error: 'media not found' });
   if (m.fileName) res.setHeader('Content-Disposition', `inline; filename="${m.fileName}"`);
+  // Encourage client/proxy caching to avoid repeated downloads
+  res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
   res.setHeader('Content-Type', m.mimeType || 'application/octet-stream');
   res.end(m.buffer);
 });
