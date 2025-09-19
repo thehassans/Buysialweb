@@ -101,7 +101,7 @@ async function fetchWithRetry(url, init, opts){
   const urlStr = String(url || '')
   const isMsgs = urlStr.includes('/api/wa/messages')
   const isChats = urlStr.includes('/api/wa/chats')
-  const maxRetries = retryable ? ((isMsgs || isChats) ? 1 : 3) : 0
+  const maxRetries = retryable ? ((isMsgs || isChats) ? 0 : 3) : 0
   let attempt = 0
   let delay = 400
   while(true){
