@@ -609,6 +609,11 @@ export default function WhatsAppInbox(){
         return true
       }catch(err){
         const msg = err?.message || ''
+        const status = err?.status
+        if ((status === 503 || status === 429) && attempt === 0){
+          await new Promise(r => setTimeout(r, 1800))
+          return trySend(1)
+        }
         if (/send-transient/i.test(msg) && attempt === 0){
           await new Promise(r => setTimeout(r, 1800))
           return trySend(1)

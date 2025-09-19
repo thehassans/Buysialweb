@@ -35,7 +35,9 @@ async function handle(res){
     try{ body = await res.clone().json(); }catch{}
     if (body){
       const msg = body?.error || body?.message || `HTTP ${res.status}`;
-      throw new Error(msg);
+      const e = new Error(msg);
+      try{ e.status = res.status }catch{}
+      throw e;
     }
   }
   // Fallback: text/HTML error pages (reverse proxies or unhandled middleware)
@@ -47,7 +49,9 @@ async function handle(res){
   else if (res.status === 502 || res.status === 504) friendly = 'Server temporarily unavailable. Please try again.';
   else if (res.status >= 500) friendly = 'Internal server error. Please try again.';
   const text = looksHtml ? (friendly || `HTTP ${res.status}`) : (stripHtml(raw) || friendly || `HTTP ${res.status}`);
-  throw new Error(text);
+  const e = new Error(text);
+  try{ e.status = res.status }catch{}
+  throw e;
 }
 
 export async function apiGet(path){

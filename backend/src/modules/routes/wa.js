@@ -260,21 +260,27 @@ router.post('/send-text', auth, async (req, res) => {
       if (!meta) return res.status(403).json({ error: 'Not allowed for this chat' });
     }
     try{
-      const r = await waService.sendText(jid, text);
+      // Per-jid serialization to avoid parallel sends that can trigger upstream 429/500
+      const chains = (global.__waSendChains = global.__waSendChains || new Map());
+      const key = String(jid)
+      const last = chains.get(key) || Promise.resolve()
+      const p = last.then(() => waService.sendText(jid, text))
+      chains.set(key, p.finally(() => { if (chains.get(key) === p) chains.delete(key) }))
+      const r = await p;
       res.json(r);
     }catch(err){
       const msg = String(err?.message || 'failed');
+      // Classify errors: transient (503) vs client (400) vs server (500)
+      const isTransient = (msg.startsWith('send-transient:') || msg.includes('wa-not-connected'))
       const isClientErr = (
-        msg.includes('wa-not-connected') ||
         msg.includes('invalid-jid') ||
         msg.includes('wa-number-not-registered') ||
-        msg.startsWith('send-failed:') ||
-        msg.startsWith('send-transient:')
+        msg.startsWith('send-failed:')
       );
-      const code = isClientErr ? 400 : 500;
+      const code = isTransient ? 503 : (isClientErr ? 400 : 500);
       try{ console.error('[send-text] error', { jid, msg, code }) }catch{}
       const body = { error: msg };
-      if (msg.startsWith('send-transient:')) body.transient = true;
+      if (isTransient) body.transient = true;
       res.status(code).json(body);
     }
   }catch(outerErr){
@@ -359,13 +365,56 @@ router.get('/media', auth, async (req, res) => {
     const meta = await ChatMeta.findOne({ jid, assignedTo: req.user.id });
     if (!meta) return res.status(403).json({ error: 'Not allowed for this chat' });
   }
-  const m = await waService.getMedia(jid, id);
-  if (!m) return res.status(404).json({ error: 'media not found' });
-  if (m.fileName) res.setHeader('Content-Disposition', `inline; filename="${m.fileName}"`);
-  // Encourage client/proxy caching to avoid repeated downloads
-  res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
-  res.setHeader('Content-Type', m.mimeType || 'application/octet-stream');
-  res.end(m.buffer);
+  const key = `${jid}:${id}`
+  const now = Date.now()
+  const cache = (global.__waMediaCache = global.__waMediaCache || new Map())
+  const cached = cache.get(key)
+  // 1 day TTL cache in-memory
+  if (cached && (now - cached.at < 86400*1000)){
+    const m = cached.data
+    if (m.fileName) res.setHeader('Content-Disposition', `inline; filename="${m.fileName}"`)
+    res.setHeader('Cache-Control', 'public, max-age=86400, immutable')
+    res.setHeader('Content-Type', m.mimeType || 'application/octet-stream')
+    try{ res.setHeader('Content-Length', String(m.buffer?.length || 0)) }catch{}
+    return res.end(m.buffer)
+  }
+  const inflight = (global.__waMediaInflight = global.__waMediaInflight || new Map())
+  if (inflight.has(key)){
+    try{
+      const m = await inflight.get(key)
+      if (!m) return res.status(404).json({ error: 'media not found' })
+      if (m.fileName) res.setHeader('Content-Disposition', `inline; filename="${m.fileName}"`)
+      res.setHeader('Cache-Control', 'public, max-age=86400, immutable')
+      res.setHeader('Content-Type', m.mimeType || 'application/octet-stream')
+      try{ res.setHeader('Content-Length', String(m.buffer?.length || 0)) }catch{}
+      return res.end(m.buffer)
+    }catch(err){
+      const msg = String(err?.message || 'failed')
+      try{ console.error('[wa media] inflight error', { jid, id, msg }) }catch{}
+      return res.status(504).json({ error: 'media-timeout' })
+    }
+  }
+  const p = (async ()=>{
+    const m = await waService.getMedia(jid, id)
+    return m
+  })()
+  inflight.set(key, p)
+  try{
+    const m = await p
+    if (!m) return res.status(404).json({ error: 'media not found' })
+    cache.set(key, { data: m, at: Date.now() })
+    if (m.fileName) res.setHeader('Content-Disposition', `inline; filename="${m.fileName}"`)
+    res.setHeader('Cache-Control', 'public, max-age=86400, immutable')
+    res.setHeader('Content-Type', m.mimeType || 'application/octet-stream')
+    try{ res.setHeader('Content-Length', String(m.buffer?.length || 0)) }catch{}
+    return res.end(m.buffer)
+  }catch(err){
+    const msg = String(err?.message || 'failed')
+    try{ console.error('[wa media] error', { jid, id, msg }) }catch{}
+    return res.status(504).json({ error: 'media-timeout' })
+  }finally{
+    inflight.delete(key)
+  }
 });
 
 // Get chat meta (notes, assignment)
