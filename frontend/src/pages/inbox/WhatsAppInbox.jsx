@@ -73,7 +73,7 @@ export default function WhatsAppInbox(){
   const [notifyGranted, setNotifyGranted] = useState(()=> (typeof Notification!=='undefined' && Notification.permission==='granted'))
   const [soundOn, setSoundOn] = useState(()=>{ try{ const v=localStorage.getItem('wa_sound'); return v? v!=='false' : true }catch{ return true } })
   const chatsLoadAtRef = useRef(0)
-  const messagesLoadRef = useRef({ inFlight: new Map(), lastAt: new Map() })
+  const messagesLoadRef = useRef({ inFlight: new Map(), lastAt: new Map(), pending: new Map(), timers: new Map(), minInterval: 4000 })
   const activeJidRef = useRef(null)
   const chatsRefreshTimerRef = useRef(null)
 
@@ -208,14 +208,14 @@ export default function WhatsAppInbox(){
 
   async function loadChats(){
     const now = Date.now()
-    if (now - (chatsLoadAtRef.current || 0) < 1000) return
+    if (now - (chatsLoadAtRef.current || 0) < 2000) return
     chatsLoadAtRef.current = now
     try{ setChats(await apiGet('/api/wa/chats')) }catch(_e){}
   }
 
   function refreshChatsSoon(){
     if (chatsRefreshTimerRef.current) return
-    chatsRefreshTimerRef.current = setTimeout(()=>{ chatsRefreshTimerRef.current = null; loadChats() }, 300)
+    chatsRefreshTimerRef.current = setTimeout(()=>{ chatsRefreshTimerRef.current = null; loadChats() }, 1000)
   }
 
   async function loadAutoAssign(){
@@ -311,13 +311,40 @@ export default function WhatsAppInbox(){
     return m
   }
 
-  async function loadMessages(jid, { reset=false } = {}){
+  async function loadMessages(jid, { reset=false, force=false } = {}){
     if(!jid) return
+    const state = messagesLoadRef.current
     const now = Date.now()
-    const lastAt = messagesLoadRef.current.lastAt.get(jid) || 0
-    const inflight = messagesLoadRef.current.inFlight.get(jid)
-    if (inflight) return inflight
-    if (now - lastAt < 1500) return
+    const lastAt = state.lastAt.get(jid) || 0
+    const inflight = state.inFlight.get(jid)
+    const MIN = state.minInterval || 2000
+    // If tab is hidden and not a forced call, skip to avoid background bursts
+    try{ if (!force && (document.hidden || !document.hasFocus())) return }catch{}
+    // If a request is already in flight, mark a trailing refresh and return same promise
+    if (inflight){
+      // Preserve a reset scroll if any caller requested it
+      const prev = state.pending.get(jid)
+      state.pending.set(jid, { reset: (prev?.reset || reset) })
+      return inflight
+    }
+    const delta = now - lastAt
+    if (!force && delta < MIN){
+      // Schedule a trailing run at the earliest allowed time
+      const prev = state.pending.get(jid)
+      state.pending.set(jid, { reset: (prev?.reset || reset) })
+      if (!state.timers.has(jid)){
+        const wait = Math.max(0, MIN - delta)
+        const t = setTimeout(()=>{
+          state.timers.delete(jid)
+          // Use saved reset if any
+          const pend = state.pending.get(jid)
+          state.pending.delete(jid)
+          loadMessages(jid, { reset: !!pend?.reset, force: true })
+        }, wait)
+        state.timers.set(jid, t)
+      }
+      return
+    }
     const p = (async ()=>{
       try{
         const r = await apiGet(`/api/wa/messages?jid=${encodeURIComponent(jid)}&limit=50`)
@@ -326,13 +353,25 @@ export default function WhatsAppInbox(){
         setHasMore(!!r?.hasMore)
         setBeforeId(r?.nextBeforeId||null)
         if (reset){ setTimeout(()=> endRef.current?.scrollIntoView({behavior:'auto'}), 0) }
-      }catch(_e){}
+      }catch(_e){
+        // If a 429 bubbled up here (e.g., via non-JSON error), set a trailing pending refresh
+        const prev = state.pending.get(jid)
+        state.pending.set(jid, { reset: (prev?.reset || reset) })
+      }
       finally{
-        messagesLoadRef.current.inFlight.delete(jid)
-        messagesLoadRef.current.lastAt.set(jid, Date.now())
+        state.inFlight.delete(jid)
+        state.lastAt.set(jid, Date.now())
+        // If any trailing refresh was requested during the call, schedule it after MIN interval
+        if (state.pending.has(jid)){
+          const pend = state.pending.get(jid)
+          state.pending.delete(jid)
+          const againDelta = Date.now() - (state.lastAt.get(jid) || 0)
+          const wait = Math.max(0, MIN - againDelta)
+          setTimeout(()=> loadMessages(jid, { reset: !!pend?.reset, force: true }), wait)
+        }
       }
     })()
-    messagesLoadRef.current.inFlight.set(jid, p)
+    state.inFlight.set(jid, p)
     return p
   }
 
@@ -614,8 +653,8 @@ export default function WhatsAppInbox(){
       return
     }
     setText('')
-    // Socket will append; perform a single delayed refresh as fallback
-    setTimeout(()=> loadMessages(activeJid), 1200)
+    // Socket will append; perform one delayed refresh as a gentle fallback
+    setTimeout(()=> loadMessages(activeJid), 2500)
   }
 
   async function loadEarlier(){
@@ -655,7 +694,8 @@ export default function WhatsAppInbox(){
       fd.append('jid', activeJid)
       for(const f of files) fd.append('files', f)
       await apiUpload('/api/wa/send-media', fd)
-      await loadMessages(activeJid)
+      // Let socket append and schedule a single gentle refresh to avoid burst
+      setTimeout(()=> loadMessages(activeJid), 2500)
     }catch(err){
       const msg = err?.message || 'Failed to upload'
       if (/403/.test(String(msg))){

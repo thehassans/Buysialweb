@@ -93,19 +93,87 @@ export async function apiUploadPatch(path, formData){
 }
 
 // Internal: retry helper primarily for idempotent GET requests
+let __getCooldownUntil = 0
+const __routeCooldown = new Map() // key -> until timestamp
 async function fetchWithRetry(url, init, opts){
   const method = (opts && opts.method) || (init && init.method) || 'GET'
   const retryable = method.toUpperCase() === 'GET'
-  const maxRetries = retryable ? 3 : 0
+  const urlStr = String(url || '')
+  const isMsgs = urlStr.includes('/api/wa/messages')
+  const isChats = urlStr.includes('/api/wa/chats')
+  const maxRetries = retryable ? ((isMsgs || isChats) ? 1 : 3) : 0
   let attempt = 0
-  let delay = 300
+  let delay = 400
   while(true){
+    // honor global cooldown after recent 429s
+    if (retryable && __getCooldownUntil){
+      const now = Date.now()
+      if (now < __getCooldownUntil){
+        await new Promise(r => setTimeout(r, __getCooldownUntil - now))
+      }
+    }
+    // Honor per-route cooldown (per jid) for WA endpoints
+    if (retryable && (isMsgs || isChats)){
+      try{
+        const u = new URL(urlStr, (typeof location!=='undefined'? location.origin : 'http://localhost'))
+        const jid = u.searchParams.get('jid') || ''
+        const key = (isMsgs? 'msgs:' : 'chats:') + jid
+        const until = __routeCooldown.get(key) || 0
+        if (until && Date.now() < until){
+          await new Promise(r => setTimeout(r, until - Date.now()))
+        }
+      }catch{}
+    }
     const res = await fetch(url, init)
+    // If 429 on WA endpoints, set per-route cooldown even if we won't retry
+    if (retryable && (isMsgs || isChats) && res.status === 429){
+      let waitMs = delay
+      try{
+        const ra = res.headers.get('retry-after')
+        if (ra){
+          if (/^\d+$/.test(ra.trim())) waitMs = Math.max(waitMs, parseInt(ra.trim(),10)*1000)
+          else { const when = Date.parse(ra); if (!Number.isNaN(when)) waitMs = Math.max(waitMs, when - Date.now()) }
+        }
+      }catch{}
+      const jitter = Math.floor(Math.random()*350)
+      __getCooldownUntil = Date.now() + Math.min(Math.max(1500, waitMs) + jitter, 8000)
+      try{
+        const u = new URL(urlStr, (typeof location!=='undefined'? location.origin : 'http://localhost'))
+        const jid = u.searchParams.get('jid') || ''
+        const key = (isMsgs? 'msgs:' : 'chats:') + jid
+        __routeCooldown.set(key, Date.now() + Math.max(2000, waitMs) + jitter)
+      }catch{}
+    }
     // Retry on 429/502/503/504 for GETs
     if (retryable && (res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504) && attempt < maxRetries){
-      await new Promise(r => setTimeout(r, delay))
+      // honor Retry-After header if present
+      let waitMs = delay
+      try{
+        const ra = res.headers.get('retry-after')
+        if (ra){
+          if (/^\d+$/.test(ra.trim())){
+            waitMs = Math.max(waitMs, parseInt(ra.trim(), 10) * 1000)
+          } else {
+            const when = Date.parse(ra)
+            if (!Number.isNaN(when)) waitMs = Math.max(waitMs, when - Date.now())
+          }
+        }
+      }catch{}
+      // set a global cooldown so other GETs back off too (jitter to avoid sync)
+      const jitter = Math.floor(Math.random()*350)
+      __getCooldownUntil = Date.now() + Math.min(Math.max(1500, waitMs) + jitter, 8000)
+      // set per-route cooldown for WA endpoints so subsequent loads queue instead of burst
+      if (isMsgs || isChats){
+        try{
+          const u = new URL(urlStr, (typeof location!=='undefined'? location.origin : 'http://localhost'))
+          const jid = u.searchParams.get('jid') || ''
+          const key = (isMsgs? 'msgs:' : 'chats:') + jid
+          __routeCooldown.set(key, Date.now() + Math.max(2000, waitMs) + jitter)
+        }catch{}
+      }
+      await new Promise(r => setTimeout(r, Math.max(200, waitMs)))
       attempt++
-      delay = Math.min(delay * 2, 2000)
+      delay = Math.min(delay * 2, 3000)
       continue
     }
     return res
