@@ -37,6 +37,15 @@ async function handle(res){
       const msg = body?.error || body?.message || `HTTP ${res.status}`;
       const e = new Error(msg);
       try{ e.status = res.status }catch{}
+      try{
+        const ra = res.headers.get('retry-after');
+        if (ra){
+          let ms = 0;
+          if (/^\d+$/.test(ra.trim())) ms = parseInt(ra.trim(), 10) * 1000
+          else { const when = Date.parse(ra); if (!Number.isNaN(when)) ms = Math.max(0, when - Date.now()) }
+          if (ms) e.retryAfterMs = ms
+        }
+      }catch{}
       throw e;
     }
   }
@@ -51,6 +60,15 @@ async function handle(res){
   const text = looksHtml ? (friendly || `HTTP ${res.status}`) : (stripHtml(raw) || friendly || `HTTP ${res.status}`);
   const e = new Error(text);
   try{ e.status = res.status }catch{}
+  try{
+    const ra = res.headers.get('retry-after');
+    if (ra){
+      let ms = 0;
+      if (/^\d+$/.test(ra.trim())) ms = parseInt(ra.trim(), 10) * 1000
+      else { const when = Date.parse(ra); if (!Number.isNaN(when)) ms = Math.max(0, when - Date.now()) }
+      if (ms) e.retryAfterMs = ms
+    }
+  }catch{}
   throw e;
 }
 
