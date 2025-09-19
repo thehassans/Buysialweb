@@ -1,0 +1,141 @@
+import express from 'express';
+import dotenv from 'dotenv';
+import cors from 'cors';
+import morgan from 'morgan';
+import http from 'http';
+import { connectDB } from './modules/config/db.js';
+import mongoose from 'mongoose';
+import path from 'path';
+import fs from 'fs';
+import { initSocket } from './modules/config/socket.js';
+import productsRoutes from './modules/routes/products.js';
+import authRoutes from './modules/routes/auth.js';
+import userRoutes from './modules/routes/users.js';
+import ordersRoutes from './modules/routes/orders.js';
+import warehouseRoutes from './modules/routes/warehouse.js';
+import financeRoutes from './modules/routes/finance.js';
+import supportRoutes from './modules/routes/support.js';
+import settingsRoutes from './modules/routes/settings.js';
+
+dotenv.config();
+
+// Early boot diagnostics
+console.log('[api] Booting API...')
+console.log('[api] ENV', {
+  PORT: process.env.PORT,
+  USE_MEMORY_DB: process.env.USE_MEMORY_DB,
+  ENABLE_WA: process.env.ENABLE_WA,
+  MONGO_URI_SET: Boolean(process.env.MONGO_URI),
+})
+
+// Prevent process exit on unexpected async errors
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err)
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled Rejection:', reason)
+})
+
+const app = express();
+const server = http.createServer(app);
+initSocket(server);
+
+const PORT = process.env.PORT || 4000;
+
+// Flexible CORS: allow comma-separated origins from env, wildcard '*', and common local dev hosts
+const envOrigins = (process.env.CORS_ORIGIN || '*')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean)
+const corsOptions = {
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true) // allow non-browser clients
+    const allowed = envOrigins
+    const isWildcard = allowed.includes('*')
+    const isListed = allowed.includes(origin)
+    const isLocal127 = /^http:\/\/127\.0\.0\.1:\d+$/i.test(origin)
+    const isLocalhost = /^http:\/\/localhost:\d+$/i.test(origin)
+    if (isWildcard || isListed || isLocal127 || isLocalhost) return cb(null, true)
+    return cb(new Error('Not allowed by CORS'))
+  },
+  credentials: true,
+}
+app.use(cors(corsOptions));
+app.use(express.json({ limit: '5mb' }));
+app.use(morgan('dev'));
+
+app.get('/api/health', (_req, res) => {
+  const dbState = mongoose.connection?.readyState ?? 0 // 0=disconnected,1=connected,2=connecting,3=disconnecting
+  const stateMap = { 0:'disconnected', 1:'connected', 2:'connecting', 3:'disconnecting' }
+  res.json({ name: 'BuySial Commerce API', status: 'ok', db: { state: dbState, label: stateMap[dbState] || String(dbState) } });
+});
+
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/orders', ordersRoutes);
+app.use('/api/products', productsRoutes);
+app.use('/api/warehouse', warehouseRoutes);
+app.use('/api/finance', financeRoutes);
+app.use('/api/support', supportRoutes);
+app.use('/api/settings', settingsRoutes);
+
+// Serve uploaded product images
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  next();
+});
+app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
+
+// Serve frontend static build if available (single-server deploy)
+// Set SERVE_STATIC=false in env to disable.
+try {
+  const serveStatic = process.env.SERVE_STATIC !== 'false';
+  const clientDist = path.resolve(process.cwd(), '../frontend/dist');
+  const indexHtml = path.join(clientDist, 'index.html');
+  if (serveStatic && fs.existsSync(indexHtml)) {
+    app.use(express.static(clientDist));
+    // SPA fallback: let client router handle 404s (but do NOT intercept API or Socket.IO paths)
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api/')) return next();
+      if (req.path.startsWith('/socket.io')) return next();
+      res.sendFile(indexHtml);
+    });
+    console.log('Serving frontend from:', clientDist);
+  }
+} catch (e) {
+  console.warn('Static serve setup skipped:', e?.message || e);
+}
+
+// Start HTTP server immediately; connect to DB in background so endpoints are reachable during DB spin-up
+server.listen(PORT, () => {
+  console.log(`API running on http://localhost:${PORT}`)
+  // Register optional routes in background
+  registerOptionalRoutes().catch(()=>{})
+});
+
+// If listen does not print in 5s, emit a hint
+setTimeout(()=>{
+  try{ console.log('[api] If you do not see "API running" above, startup may be blocked by an import error.') }catch{}
+}, 5000)
+connectDB()
+  .then(() => {
+    console.log('Database connected')
+  })
+  .catch((err) => {
+    console.error('Database connection error:', err)
+  })
+
+async function registerOptionalRoutes(){
+  try{
+    const enableWA = process.env.ENABLE_WA !== 'false'
+    if (enableWA){
+      const { default: waRoutes } = await import('./modules/routes/wa.js')
+      app.use('/api/wa', waRoutes)
+      console.log('WhatsApp routes enabled')
+    } else {
+      console.log('WhatsApp routes disabled via ENABLE_WA=false')
+    }
+  }catch(err){
+    console.error('Failed to init WhatsApp routes (continuing):', err?.message || err)
+  }
+}
