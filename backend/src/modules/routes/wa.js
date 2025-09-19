@@ -113,6 +113,65 @@ router.get('/events', auth, async (req, res) => {
 
 // List chats (enriched with ownership info)
 router.get('/chats', auth, async (req, res) => {
+  // In-memory TTL cache + in-flight de-duplication
+  // Keyed by user id so agents only see their own filtered list
+  const uid = String(req.user?.id || 'anon')
+  const cacheKey = `chats:${uid}`
+  const now = Date.now()
+  const ttlMs = 2000
+  try{
+    const cached = (global.__waChatCache = global.__waChatCache || new Map()).get(cacheKey)
+    if (cached && (now - cached.at < ttlMs)){
+      return res.json(cached.data)
+    }
+    const inflightMap = (global.__waChatInflight = global.__waChatInflight || new Map())
+    if (inflightMap.has(cacheKey)){
+      try{ const data = await inflightMap.get(cacheKey); return res.json(data) }catch(e){ /* fallthrough */ }
+    }
+    const p = (async ()=>{
+      const waService = await getWaService();
+      let chats = await waService.listChats();
+      let filterToJids = null;
+      if (req.user?.role === 'agent') {
+        const metas = await ChatMeta.find({ assignedTo: req.user.id }, 'jid').lean();
+        const allowed = new Set(metas.map(m => m.jid));
+        chats = chats.filter(c => allowed.has(c.id));
+        filterToJids = new Set(chats.map(c => c.id));
+      }
+      // Load meta for these chats
+      const jids = chats.map(c => c.id);
+      const metas = await ChatMeta.find(filterToJids ? { jid: { $in: Array.from(filterToJids) } } : { jid: { $in: jids } }).lean();
+      const metaByJid = new Map(metas.map(m => [m.jid, m]));
+      // Fetch owners
+      const ownerIds = Array.from(new Set(metas.filter(m => m.assignedTo).map(m => String(m.assignedTo))));
+      let ownersById = new Map();
+      if (ownerIds.length) {
+        const owners = await User.find({ _id: { $in: ownerIds } }, 'firstName lastName email').lean();
+        ownersById = new Map(owners.map(u => [String(u._id), u]));
+      }
+      const enriched = chats.map(c => {
+        const m = metaByJid.get(c.id);
+        let owner = null;
+        if (m && m.assignedTo) {
+          const u = ownersById.get(String(m.assignedTo));
+          if (u) { owner = { id: String(m.assignedTo), name: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email || 'Agent' }; }
+          else { owner = { id: String(m.assignedTo), name: 'Agent' }; }
+        }
+        return { ...c, owner };
+      });
+      return enriched
+    })()
+    inflightMap.set(cacheKey, p)
+    try{
+      const data = await p
+      ;(global.__waChatCache).set(cacheKey, { data, at: now })
+      return res.json(data)
+    }finally{
+      inflightMap.delete(cacheKey)
+    }
+  }catch(err){
+    // Fallback to original logic if cache path errors
+  }
   const waService = await getWaService();
   let chats = await waService.listChats();
   let filterToJids = null;
@@ -148,13 +207,44 @@ router.get('/chats', auth, async (req, res) => {
 
 // Get messages for a chat
 router.get('/messages', auth, async (req, res) => {
-  const waService = await getWaService();
   const { jid, limit, beforeId } = req.query;
   if (!jid) return res.status(400).json({ error: 'jid required' });
   if (req.user?.role === 'agent') {
     const meta = await ChatMeta.findOne({ jid, assignedTo: req.user.id });
     if (!meta) return res.status(403).json({ error: 'Not allowed for this chat' });
   }
+  // In-memory TTL cache + in-flight de-duplication by user + chat + cursor
+  const uid = String(req.user?.id || 'anon')
+  const key = `msgs:${uid}:${jid}:${beforeId||''}:${limit||''}`
+  const now = Date.now()
+  const ttlMs = 4000
+  try{
+    const cache = (global.__waMsgCache = global.__waMsgCache || new Map())
+    const cached = cache.get(key)
+    if (cached && (now - cached.at < ttlMs)){
+      return res.json(cached.data)
+    }
+    const inMap = (global.__waMsgInflight = global.__waMsgInflight || new Map())
+    if (inMap.has(key)){
+      try{ const data = await inMap.get(key); return res.json(data) }catch(e){ /* fallthrough */ }
+    }
+    const p = (async ()=>{
+      const waService = await getWaService();
+      const msgs = await waService.getMessages(jid, limit ? Number(limit) : 25, beforeId || null);
+      return msgs
+    })()
+    inMap.set(key, p)
+    try{
+      const data = await p
+      cache.set(key, { data, at: now })
+      return res.json(data)
+    }finally{
+      inMap.delete(key)
+    }
+  }catch(err){
+    // fall back to direct service on any cache error
+  }
+  const waService = await getWaService();
   const msgs = await waService.getMessages(jid, limit ? Number(limit) : 25, beforeId || null);
   res.json(msgs);
 });

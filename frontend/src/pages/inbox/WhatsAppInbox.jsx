@@ -73,7 +73,7 @@ export default function WhatsAppInbox(){
   const [notifyGranted, setNotifyGranted] = useState(()=> (typeof Notification!=='undefined' && Notification.permission==='granted'))
   const [soundOn, setSoundOn] = useState(()=>{ try{ const v=localStorage.getItem('wa_sound'); return v? v!=='false' : true }catch{ return true } })
   const chatsLoadAtRef = useRef(0)
-  const messagesLoadRef = useRef({ inFlight: new Map(), lastAt: new Map(), pending: new Map(), timers: new Map(), minInterval: 4000 })
+  const messagesLoadRef = useRef({ inFlight: new Map(), lastAt: new Map(), pending: new Map(), timers: new Map(), minInterval: 8000 })
   const activeJidRef = useRef(null)
   const chatsRefreshTimerRef = useRef(null)
 
@@ -208,14 +208,14 @@ export default function WhatsAppInbox(){
 
   async function loadChats(){
     const now = Date.now()
-    if (now - (chatsLoadAtRef.current || 0) < 2000) return
+    if (now - (chatsLoadAtRef.current || 0) < 4000) return
     chatsLoadAtRef.current = now
     try{ setChats(await apiGet('/api/wa/chats')) }catch(_e){}
   }
 
   function refreshChatsSoon(){
     if (chatsRefreshTimerRef.current) return
-    chatsRefreshTimerRef.current = setTimeout(()=>{ chatsRefreshTimerRef.current = null; loadChats() }, 1000)
+    chatsRefreshTimerRef.current = setTimeout(()=>{ chatsRefreshTimerRef.current = null; loadChats() }, 1500)
   }
 
   async function loadAutoAssign(){

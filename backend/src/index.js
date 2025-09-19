@@ -135,7 +135,10 @@ app.get('*', (req, res, next) => {
     if (p.startsWith('/socket.io')) return next();
     if (p.startsWith('/uploads')) return next();
     if (p.startsWith('/assets/')) return next();
-    if (INDEX_HTML && fs.existsSync(INDEX_HTML)) return res.sendFile(INDEX_HTML);
+    if (INDEX_HTML && fs.existsSync(INDEX_HTML)) {
+      try{ res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate') }catch{}
+      return res.sendFile(INDEX_HTML);
+    }
     return next();
   } catch {
     return next();
