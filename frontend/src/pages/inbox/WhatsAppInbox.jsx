@@ -8,7 +8,7 @@ import { parsePhoneNumberFromString } from 'libphonenumber-js'
 // Avatar UI moved to src/ui/Avatar.jsx
 
 // Global media fetch queue to avoid bursts that trigger 429s
-const __mediaQueue = { active: 0, limit: 3, queue: [], inFlight: new Map() }
+const __mediaQueue = { active: 0, limit: 2, queue: [], inFlight: new Map() }
 function __dequeueMedia(){
   try{
     while (__mediaQueue.active < __mediaQueue.limit && __mediaQueue.queue.length){
@@ -73,6 +73,9 @@ export default function WhatsAppInbox(){
   const [notifyGranted, setNotifyGranted] = useState(()=> (typeof Notification!=='undefined' && Notification.permission==='granted'))
   const [soundOn, setSoundOn] = useState(()=>{ try{ const v=localStorage.getItem('wa_sound'); return v? v!=='false' : true }catch{ return true } })
   const chatsLoadAtRef = useRef(0)
+  const messagesLoadRef = useRef({ inFlight: new Map(), lastAt: new Map() })
+  const activeJidRef = useRef(null)
+  const chatsRefreshTimerRef = useRef(null)
 
   // Chat list filters and new chat UX
   const [chatFilter, setChatFilter] = useState('all') // all | unread | read
@@ -210,6 +213,11 @@ export default function WhatsAppInbox(){
     try{ setChats(await apiGet('/api/wa/chats')) }catch(_e){}
   }
 
+  function refreshChatsSoon(){
+    if (chatsRefreshTimerRef.current) return
+    chatsRefreshTimerRef.current = setTimeout(()=>{ chatsRefreshTimerRef.current = null; loadChats() }, 300)
+  }
+
   async function loadAutoAssign(){
     try{
       const r = await apiGet('/api/wa/auto-assign')
@@ -305,14 +313,27 @@ export default function WhatsAppInbox(){
 
   async function loadMessages(jid, { reset=false } = {}){
     if(!jid) return
-    try{
-      const r = await apiGet(`/api/wa/messages?jid=${encodeURIComponent(jid)}&limit=50`)
-      const items = Array.isArray(r) ? r : (r?.items||[])
-      setMessages(items)
-      setHasMore(!!r?.hasMore)
-      setBeforeId(r?.nextBeforeId||null)
-      if (reset){ setTimeout(()=> endRef.current?.scrollIntoView({behavior:'auto'}), 0) }
-    }catch(_e){}
+    const now = Date.now()
+    const lastAt = messagesLoadRef.current.lastAt.get(jid) || 0
+    const inflight = messagesLoadRef.current.inFlight.get(jid)
+    if (inflight) return inflight
+    if (now - lastAt < 1500) return
+    const p = (async ()=>{
+      try{
+        const r = await apiGet(`/api/wa/messages?jid=${encodeURIComponent(jid)}&limit=50`)
+        const items = Array.isArray(r) ? r : (r?.items||[])
+        setMessages(items)
+        setHasMore(!!r?.hasMore)
+        setBeforeId(r?.nextBeforeId||null)
+        if (reset){ setTimeout(()=> endRef.current?.scrollIntoView({behavior:'auto'}), 0) }
+      }catch(_e){}
+      finally{
+        messagesLoadRef.current.inFlight.delete(jid)
+        messagesLoadRef.current.lastAt.set(jid, Date.now())
+      }
+    })()
+    messagesLoadRef.current.inFlight.set(jid, p)
+    return p
   }
 
   useEffect(()=>{ loadChats(); loadAutoAssign() },[])
@@ -370,22 +391,30 @@ export default function WhatsAppInbox(){
       setChats(prev => prev.map(c => c.id===activeJid ? { ...c, unread:false, unreadCount:0 } : c))
     } 
   },[activeJid])
+  useEffect(()=>{ activeJidRef.current = activeJid }, [activeJid])
 
-  // Real-time updates with WebSockets
+  // Real-time updates with WebSockets (create once)
   useEffect(()=>{
-    const socket = io(API_BASE, { transports: ['websocket','polling'], withCredentials: true, path: '/socket.io' })
+    const socket = io(API_BASE, {
+      transports: ['websocket','polling'],
+      withCredentials: true,
+      path: '/socket.io',
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 800,
+      reconnectionDelayMax: 5000,
+    })
 
     socket.on('connect', ()=> console.log('Socket connected'))
     socket.on('disconnect', ()=> console.log('Socket disconnected'))
     socket.on('connect_error', (err)=>{
-      // Helpful logging to diagnose connection issues
       console.warn('Socket connect_error:', err?.message || err)
     })
 
     // Listen for new messages
     socket.on('message.new', ({ jid, message }) => {
-      loadChats() // Refresh chat list for preview and order
-      if (jid === activeJid) {
+      refreshChatsSoon() // debounce chat list refresh
+      if (jid === activeJidRef.current) {
         setMessages(prev => [...prev, message])
         setTimeout(()=> endRef.current?.scrollIntoView({ behavior:'smooth' }), 100)
       }
@@ -394,7 +423,7 @@ export default function WhatsAppInbox(){
         const isMe = !!message?.key?.fromMe
         if (!isMe){
           const hidden = document.hidden || !document.hasFocus()
-          const notActive = jid !== activeJid
+          const notActive = jid !== activeJidRef.current
           if (hidden || notActive){
             notifyIncoming(jid, message)
           }
@@ -404,13 +433,13 @@ export default function WhatsAppInbox(){
 
     // Listen for message status updates
     socket.on('message.status', ({ jid, id, status }) => {
-      if (jid === activeJid) {
+      if (jid === activeJidRef.current) {
         setMessages(prev => prev.map(m => m.key?.id === id ? { ...m, status } : m))
       }
     })
 
     return ()=> socket.disconnect()
-  },[activeJid])
+  },[])
 
   // Close popovers on outside click
   useEffect(()=>{
@@ -585,9 +614,8 @@ export default function WhatsAppInbox(){
       return
     }
     setText('')
-    // Quick refresh; socket will append near-instantly as well
-    await loadMessages(activeJid)
-    setTimeout(()=> loadMessages(activeJid), 900)
+    // Socket will append; perform a single delayed refresh as fallback
+    setTimeout(()=> loadMessages(activeJid), 1200)
   }
 
   async function loadEarlier(){

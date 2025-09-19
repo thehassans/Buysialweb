@@ -19,6 +19,10 @@ class SocketManager {
     this.io = new Server(server, {
       cors: corsOpts,
       path: '/socket.io',
+      transports: ['websocket', 'polling'],
+      allowEIO3: true,
+      pingTimeout: 30000, // wait longer before considering the connection closed
+      pingInterval: 20000, // send pings frequently to keep upstream proxies happy
     });
 
     this.io.on('connection', (socket) => {
