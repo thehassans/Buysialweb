@@ -111,6 +111,7 @@ app.get('*', (req, res, next) => {
     if (p.startsWith('/api/')) return next();
     if (p.startsWith('/socket.io')) return next();
     if (p.startsWith('/uploads')) return next();
+    if (p.startsWith('/assets/')) return next();
     if (fs.existsSync(indexHtml)) return res.sendFile(indexHtml);
     return next();
   } catch {
