@@ -263,14 +263,18 @@ router.post('/send-text', auth, async (req, res) => {
     res.json(r);
   }catch(err){
     const msg = String(err?.message || 'failed');
-    const code = (
+    const isClientErr = (
       msg.includes('wa-not-connected') ||
       msg.includes('invalid-jid') ||
       msg.includes('wa-number-not-registered') ||
-      msg.startsWith('send-failed:')
-    ) ? 400 : 500;
+      msg.startsWith('send-failed:') ||
+      msg.startsWith('send-transient:')
+    );
+    const code = isClientErr ? 400 : 500;
     try{ console.error('[send-text] error', { jid, msg, code }) }catch{}
-    res.status(code).json({ error: msg });
+    const body = { error: msg };
+    if (msg.startsWith('send-transient:')) body.transient = true;
+    res.status(code).json(body);
   }
 });
 

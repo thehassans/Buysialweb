@@ -602,53 +602,58 @@ export default function WhatsAppInbox(){
     }
     setMessages(prev => [...prev, optimistic])
     setTimeout(()=> endRef.current?.scrollIntoView({ behavior:'smooth' }), 0)
-    try{
-      await apiPost('/api/wa/send-text', { jid: activeJid, text: toSend })
-    }catch(err){
-      const msg = err?.message || ''
-      if (/403/.test(msg)){
-        alert('Not allowed to send to this chat. If you are an agent, make sure the chat is assigned to you.')
-        // Rollback optimistic
-        setMessages(prev => prev.filter(m => m?.key?.id !== tempId))
-        return
-      }
-      // Handle WhatsApp not connected gracefully
-      if (/wa-not-connected/i.test(msg)){
-        try{
-          // Verify actual backend status to avoid false prompts right after reconnect
-          const st = await apiGet('/api/wa/status')
-          const isConnected = !!st?.connected
-          if (!isConnected){
-            const role = myRole || ''
-            if (role === 'admin' || role === 'user'){
-              const base = role === 'admin' ? '/admin' : '/user'
-              if (confirm('WhatsApp is not connected. Open the Connect page now?')){
-                navigate(`${base}/inbox/connect`)
-              }
-            } else if (role === 'manager'){
-              alert('WhatsApp session is not connected. Please ask the Admin or User to connect WhatsApp from their panel (Inbox → Connect).')
-            } else if (role === 'agent'){
-              alert('WhatsApp session is not connected. Please ask your Admin/User to connect WhatsApp from Inbox → Connect.')
-            } else {
-              if (confirm('WhatsApp is not connected. Open the Connect page?')){
-                navigate('/user/inbox/connect')
-              }
-            }
-          } else {
-            // Connected but transient send failure – guide user to retry
-            alert('Message could not be sent due to a temporary connection hiccup. Please try again.')
-          }
-        }catch{
-          // If status check fails, fall back to prompt
-          if (confirm('WhatsApp might not be connected. Open the Connect page now?')){
-            navigate('/user/inbox/connect')
-          }
+    // One-time auto-retry on transient send failures
+    const trySend = async (attempt)=>{
+      try{
+        await apiPost('/api/wa/send-text', { jid: activeJid, text: toSend })
+        return true
+      }catch(err){
+        const msg = err?.message || ''
+        if (/send-transient/i.test(msg) && attempt === 0){
+          await new Promise(r => setTimeout(r, 1800))
+          return trySend(1)
         }
-      } else if (/send-transient/i.test(msg)){
-        alert('Message could not be sent due to a temporary connection hiccup. Please try again.')
-      } else {
+        if (/403/.test(msg)){
+          alert('Not allowed to send to this chat. If you are an agent, make sure the chat is assigned to you.')
+          return false
+        }
+        if (/wa-not-connected/i.test(msg)){
+          try{
+            const st = await apiGet('/api/wa/status')
+            const isConnected = !!st?.connected
+            if (!isConnected){
+              const role = myRole || ''
+              if (role === 'admin' || role === 'user'){
+                const base = role === 'admin' ? '/admin' : '/user'
+                if (confirm('WhatsApp is not connected. Open the Connect page now?')){
+                  navigate(`${base}/inbox/connect`)
+                }
+              } else if (role === 'manager'){
+                alert('WhatsApp session is not connected. Please ask the Admin or User to connect WhatsApp from their panel (Inbox → Connect).')
+              } else if (role === 'agent'){
+                alert('WhatsApp session is not connected. Please ask your Admin/User to connect WhatsApp from Inbox → Connect.')
+              } else {
+                if (confirm('WhatsApp is not connected. Open the Connect page?')){
+                  navigate('/user/inbox/connect')
+                }
+              }
+            } else {
+              alert('Message could not be sent due to a temporary connection hiccup. Please try again.')
+            }
+          }catch{
+            if (confirm('WhatsApp might not be connected. Open the Connect page now?')){
+              navigate('/user/inbox/connect')
+            }
+          }
+          return false
+        }
         alert(msg || 'Failed to send message')
+        return false
       }
+    }
+    const ok = await trySend(0)
+    if (!ok){
+      // Rollback optimistic on failure after retries
       setMessages(prev => prev.filter(m => m?.key?.id !== tempId))
       return
     }
