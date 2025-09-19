@@ -88,23 +88,35 @@ app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
 
 // Serve frontend static build if available (single-server deploy)
 // Set SERVE_STATIC=false in env to disable.
+const clientDist = path.resolve(process.cwd(), '../frontend/dist');
+const indexHtml = path.join(clientDist, 'index.html');
 try {
   const serveStatic = process.env.SERVE_STATIC !== 'false';
-  const clientDist = path.resolve(process.cwd(), '../frontend/dist');
-  const indexHtml = path.join(clientDist, 'index.html');
   if (serveStatic && fs.existsSync(indexHtml)) {
     app.use(express.static(clientDist));
-    // SPA fallback: let client router handle 404s (but do NOT intercept API or Socket.IO paths)
-    app.get('*', (req, res, next) => {
-      if (req.path.startsWith('/api/')) return next();
-      if (req.path.startsWith('/socket.io')) return next();
-      res.sendFile(indexHtml);
-    });
     console.log('Serving frontend from:', clientDist);
+  } else if (!serveStatic) {
+    console.log('Static serving disabled via SERVE_STATIC=false');
+  } else {
+    console.warn('Frontend dist not found, SPA will not be served:', indexHtml);
   }
 } catch (e) {
   console.warn('Static serve setup skipped:', e?.message || e);
 }
+
+// SPA fallback: let client router handle 404s (but do NOT intercept API, Socket.IO, or upload paths)
+app.get('*', (req, res, next) => {
+  try {
+    const p = req.path || '';
+    if (p.startsWith('/api/')) return next();
+    if (p.startsWith('/socket.io')) return next();
+    if (p.startsWith('/uploads')) return next();
+    if (fs.existsSync(indexHtml)) return res.sendFile(indexHtml);
+    return next();
+  } catch {
+    return next();
+  }
+});
 
 // Start HTTP server immediately; connect to DB in background so endpoints are reachable during DB spin-up
 server.listen(PORT, () => {
