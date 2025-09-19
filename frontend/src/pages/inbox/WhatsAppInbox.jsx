@@ -7,6 +7,32 @@ import { parsePhoneNumberFromString } from 'libphonenumber-js'
 
 // Avatar UI moved to src/ui/Avatar.jsx
 
+// Global media fetch queue to avoid bursts that trigger 429s
+const __mediaQueue = { active: 0, limit: 3, queue: [], inFlight: new Map() }
+function __dequeueMedia(){
+  try{
+    while (__mediaQueue.active < __mediaQueue.limit && __mediaQueue.queue.length){
+      const run = __mediaQueue.queue.shift()
+      run && run()
+    }
+  }catch{}
+}
+function scheduleMediaFetch(key, fn){
+  if (__mediaQueue.inFlight.has(key)) return __mediaQueue.inFlight.get(key)
+  const p = new Promise((resolve, reject)=>{
+    const run = async ()=>{
+      __mediaQueue.active++
+      try{ resolve(await fn()) }
+      catch(e){ reject(e) }
+      finally { __mediaQueue.active--; __mediaQueue.inFlight.delete(key); __dequeueMedia() }
+    }
+    __mediaQueue.queue.push(run)
+    __dequeueMedia()
+  })
+  __mediaQueue.inFlight.set(key, p)
+  return p
+}
+
 export default function WhatsAppInbox(){
   const navigate = useNavigate()
   const location = useLocation()
@@ -46,6 +72,7 @@ export default function WhatsAppInbox(){
   // Notifications & sound
   const [notifyGranted, setNotifyGranted] = useState(()=> (typeof Notification!=='undefined' && Notification.permission==='granted'))
   const [soundOn, setSoundOn] = useState(()=>{ try{ const v=localStorage.getItem('wa_sound'); return v? v!=='false' : true }catch{ return true } })
+  const chatsLoadAtRef = useRef(0)
 
   // Chat list filters and new chat UX
   const [chatFilter, setChatFilter] = useState('all') // all | unread | read
@@ -177,6 +204,9 @@ export default function WhatsAppInbox(){
   const [toast, setToast] = useState('')
 
   async function loadChats(){
+    const now = Date.now()
+    if (now - (chatsLoadAtRef.current || 0) < 1000) return
+    chatsLoadAtRef.current = now
     try{ setChats(await apiGet('/api/wa/chats')) }catch(_e){}
   }
 
@@ -955,12 +985,28 @@ export default function WhatsAppInbox(){
   async function ensureMediaUrl(jid, id){
     const key = `${jid}:${id}`
     if (mediaUrlCacheRef.current.has(key)) return mediaUrlCacheRef.current.get(key)
-    try{
-      const blob = await apiGetBlob(`/api/wa/media?jid=${encodeURIComponent(jid)}&id=${encodeURIComponent(id)}`)
-      const url = URL.createObjectURL(blob)
-      mediaUrlCacheRef.current.set(key, url)
-      return url
-    }catch{ return null }
+    const task = async ()=>{
+      let tries = 0
+      let delay = 400
+      for(;;){
+        try{
+          const blob = await apiGetBlob(`/api/wa/media?jid=${encodeURIComponent(jid)}&id=${encodeURIComponent(id)}`)
+          const url = URL.createObjectURL(blob)
+          mediaUrlCacheRef.current.set(key, url)
+          return url
+        }catch(e){
+          const msg = String(e?.message || '')
+          if (msg.includes('429') && tries < 3){
+            await new Promise(res=> setTimeout(res, delay))
+            delay = Math.min(delay * 2, 3000)
+            tries++
+            continue
+          }
+          return null
+        }
+      }
+    }
+    return scheduleMediaFetch(key, task)
   }
 
   function Ticks({ isMe, status }){

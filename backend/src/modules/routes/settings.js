@@ -92,8 +92,8 @@ router.get('/manifest', async (req, res) => {
       { src: iconSrc, sizes: '192x192', type: iconType, purpose: 'any maskable' },
       { src: iconSrc, sizes: '512x512', type: iconType, purpose: 'any maskable' },
     ] : [
-      { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
-      { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+      { src: '/BuySial2.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+      { src: '/BuySial2.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
     ]
 
     const manifest = {
