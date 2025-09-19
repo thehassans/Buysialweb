@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import PasswordInput from '../../components/PasswordInput.jsx'
-import { API_BASE } from '../../api.js'
+import { API_BASE, apiGet, apiPost } from '../../api.js'
 
 export default function UserLogin(){
   const [email,setEmail]=useState('')
@@ -9,25 +9,33 @@ export default function UserLogin(){
   const [health, setHealth] = useState({ ok:false, dbLabel:'unknown' })
   const [branding, setBranding] = useState({ headerLogo: null, loginLogo: null })
 
-  // Poll backend health so users know when DB is ready (first run can take a minute)
+  // Health check with backoff; stop once healthy
   useEffect(()=>{
-    let alive = true
-    const fetchHealth = async ()=>{
+    let cancelled = false
+    let attempt = 0
+    const delays = [3000, 7000, 15000, 30000]
+    async function run(){
       try{
-        const r = await fetch(`${API_BASE}/api/health`)
-        const j = await r.json()
-        if (!alive) return
+        const j = await apiGet('/api/health')
+        if (cancelled) return
         const dbLabel = j?.db?.label || 'unknown'
         const ok = j?.status === 'ok'
         setHealth({ ok, dbLabel })
+        if (!ok){
+          const d = delays[Math.min(attempt, delays.length-1)]
+          attempt++
+          setTimeout(()=>{ if(!cancelled) run() }, d)
+        }
       }catch{
-        if (!alive) return
+        if (cancelled) return
         setHealth({ ok:false, dbLabel:'unreachable' })
+        const d = delays[Math.min(attempt, delays.length-1)]
+        attempt++
+        setTimeout(()=>{ if(!cancelled) run() }, d)
       }
     }
-    fetchHealth()
-    const id = setInterval(fetchHealth, 3000)
-    return ()=>{ alive = false; clearInterval(id) }
+    run()
+    return ()=>{ cancelled = true }
   },[])
 
   // Load branding (public, no auth needed)
@@ -35,9 +43,7 @@ export default function UserLogin(){
     let cancelled = false
     ;(async()=>{
       try{
-        const r = await fetch(`${API_BASE}/api/settings/branding`)
-        if (!r.ok) return
-        const j = await r.json()
+        const j = await apiGet('/api/settings/branding')
         if (!cancelled) setBranding({ headerLogo: j.headerLogo||null, loginLogo: j.loginLogo||null })
       }catch{ /* ignore */ }
     })()
@@ -48,14 +54,7 @@ export default function UserLogin(){
     e.preventDefault()
     setLoading(true)
     try{
-      const controller = new AbortController()
-      const t = setTimeout(()=> controller.abort(), 15000)
-      const res = await fetch(`${API_BASE}/api/auth/login`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }), signal: controller.signal
-      })
-      clearTimeout(t)
-      if(!res.ok) throw new Error(await res.text())
-      const data = await res.json()
+      const data = await apiPost('/api/auth/login', { email, password })
       localStorage.setItem('token', data.token)
       localStorage.setItem('me', JSON.stringify(data.user))
       if (data.user.role === 'admin') location.href = '/admin'
@@ -65,8 +64,14 @@ export default function UserLogin(){
       else if (data.user.role === 'driver') location.href = '/driver'
       else location.href = '/user'
     }catch(e){
-      const msg = (e && e.name === 'AbortError') ? 'Login request timed out. Please check the backend (http://localhost:4000) and try again.' : 'Login failed'
-      alert(msg)
+      const raw = String(e?.message || '')
+      if (/(429|Too Many Requests)/i.test(raw)){
+        alert('Too many requests. Please wait a few seconds and try again.')
+      } else if (/Invalid|failed|HTTP\s*400/i.test(raw)){
+        alert('Login failed. Please check your email/password and try again.')
+      } else {
+        alert('Login failed')
+      }
     }finally{ setLoading(false) }
   }
 

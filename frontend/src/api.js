@@ -51,7 +51,7 @@ async function handle(res){
 }
 
 export async function apiGet(path){
-  const res = await fetch(`${API_BASE}${path}`, { headers: { 'Content-Type': 'application/json', ...authHeader() } });
+  const res = await fetchWithRetry(`${API_BASE}${path}`, { headers: { 'Content-Type': 'application/json', ...authHeader() } }, { method: 'GET' });
   await handle(res);
   return res.json();
 }
@@ -69,7 +69,7 @@ export async function apiUpload(path, formData){
 }
 
 export async function apiGetBlob(path){
-  const res = await fetch(`${API_BASE}${path}`, { headers: { ...authHeader() } });
+  const res = await fetchWithRetry(`${API_BASE}${path}`, { headers: { ...authHeader() } }, { method: 'GET' });
   await handle(res);
   return res.blob();
 }
@@ -90,4 +90,24 @@ export async function apiUploadPatch(path, formData){
   const res = await fetch(`${API_BASE}${path}`, { method: 'PATCH', headers: { ...authHeader() }, body: formData });
   await handle(res);
   return res.json();
+}
+
+// Internal: retry helper primarily for idempotent GET requests
+async function fetchWithRetry(url, init, opts){
+  const method = (opts && opts.method) || (init && init.method) || 'GET'
+  const retryable = method.toUpperCase() === 'GET'
+  const maxRetries = retryable ? 3 : 0
+  let attempt = 0
+  let delay = 300
+  while(true){
+    const res = await fetch(url, init)
+    // Retry on 429/502/503/504 for GETs
+    if (retryable && (res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504) && attempt < maxRetries){
+      await new Promise(r => setTimeout(r, delay))
+      attempt++
+      delay = Math.min(delay * 2, 2000)
+      continue
+    }
+    return res
+  }
 }
