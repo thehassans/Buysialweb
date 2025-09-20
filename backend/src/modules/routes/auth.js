@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import rateLimit from '../middleware/rateLimit.js';
 
 // Use a default secret in development so the app works without .env
 const SECRET = process.env.JWT_SECRET || 'devsecret-change-me';
@@ -29,27 +30,42 @@ router.post('/seed-admin-login', async (req, res) => {
   return res.json({ token, user: { id: admin._id, role: admin.role, firstName: admin.firstName, lastName: admin.lastName, email: admin.email } });
 })
 
-router.post('/login', async (req, res) => {
+router.post('/login', rateLimit({ windowMs: 60000, max: 20 }), async (req, res) => {
   try{
-    const rawEmail = (req.body && req.body.email) || ''
-    const rawPassword = (req.body && req.body.password) || ''
-    const emailInput = String(rawEmail || '').trim()
-    const password = String(rawPassword || '')
-    if (!emailInput || !password) return res.status(400).json({ message: 'Invalid credentials' })
-    const emailLower = emailInput.toLowerCase()
-    // Try exact match first (fast, uses index), then lower-case, then case-insensitive regex
-    let user = await User.findOne({ email: emailInput })
-    if (!user) user = await User.findOne({ email: emailLower })
-    if (!user) {
-      const esc = emailInput.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      user = await User.findOne({ email: { $regex: `^${esc}$`, $options: 'i' } })
+    let { email, password } = req.body || {};
+    const e = String(email || '').trim().toLowerCase();
+    const p = String(password || '').trim();
+    if (!e || !p) return res.status(400).json({ message: 'Invalid credentials' });
+
+    // Primary: normalized lookup
+    let user = await User.findOne({ email: e });
+    // Fallback: case-insensitive exact match (helps legacy data where email wasn't normalized)
+    if (!user){
+      try{
+        const esc = e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        user = await User.findOne({ email: new RegExp('^'+esc+'$', 'i') });
+      }catch{}
     }
-    if (!user) return res.status(400).json({ message: 'Invalid credentials' })
-    const ok = await user.comparePassword(password)
-    if (!ok) return res.status(400).json({ message: 'Invalid credentials' })
-    const token = jwt.sign({ id: user._id, role: user.role, firstName: user.firstName, lastName: user.lastName }, SECRET, { expiresIn: '7d' })
-    return res.json({ token, user: { id: user._id, role: user.role, firstName: user.firstName, lastName: user.lastName, email: user.email } })
+    if (!user) return res.status(400).json({ message: 'Invalid credentials' });
+
+    let ok = await user.comparePassword(p);
+    if (!ok){
+      // Transitional support: if the stored password appears to be plaintext and matches, rehash it now
+      try{
+        const looksHashed = typeof user.password === 'string' && /^\$2[aby]\$/.test(user.password);
+        if (!looksHashed && user.password === p){
+          user.password = p; // triggers pre-save hook to bcrypt-hash
+          await user.save();
+          ok = true;
+        }
+      }catch{}
+    }
+    if (!ok) return res.status(400).json({ message: 'Invalid credentials' });
+
+    const token = jwt.sign({ id: user._id, role: user.role, firstName: user.firstName, lastName: user.lastName }, SECRET, { expiresIn: '7d' });
+    return res.json({ token, user: { id: user._id, role: user.role, firstName: user.firstName, lastName: user.lastName, email: user.email } });
   }catch(err){
+    try{ console.error('[auth/login] error', err?.message || err) }catch{}
     return res.status(500).json({ message: 'Login failed' })
   }
 });
