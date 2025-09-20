@@ -377,7 +377,7 @@ router.get('/media', auth, async (req, res) => {
     const rec = failMap.get(key)
     if (rec && typeof rec.until === 'number' && now < rec.until){
       const waitSec = Math.ceil((rec.until - now)/1000)
-      try{ res.setHeader('Retry-After', String(Math.max(2, waitSec))) }catch{}
+      try{ res.setHeader('Retry-After', String(Math.max(5, waitSec))) }catch{}
       return res.status(504).json({ error: 'media-timeout' })
     }
   }catch{}
@@ -410,7 +410,7 @@ router.get('/media', auth, async (req, res) => {
         const failMap = (global.__waMediaFail = global.__waMediaFail || new Map())
         const rec = failMap.get(key) || { count: 0, until: 0 }
         rec.count = (rec.count||0) + 1
-        const waitSec = Math.min(30, 5 + rec.count*5) // Less aggressive: max 30s vs 60s
+        const waitSec = Math.min(60, 10 + rec.count*10)
         rec.until = Date.now() + waitSec*1000
         failMap.set(key, rec)
         res.setHeader('Retry-After', String(waitSec))
@@ -442,7 +442,7 @@ router.get('/media', auth, async (req, res) => {
       const failMap = (global.__waMediaFail = global.__waMediaFail || new Map())
       const rec = failMap.get(key) || { count: 0, until: 0 }
       rec.count = (rec.count||0) + 1
-      const waitSec = Math.min(30, 5 + rec.count*5) // Less aggressive: max 30s vs 60s
+      const waitSec = Math.min(60, 10 + rec.count*10)
       rec.until = Date.now() + waitSec*1000
       failMap.set(key, rec)
       res.setHeader('Retry-After', String(waitSec))
@@ -493,30 +493,6 @@ router.post('/chat-meta/assign', auth, allowRoles('admin', 'user'), async (req, 
   meta.assignedBy = req.user.id;
   await meta.save();
   res.json({ ok: true, meta });
-// Mark messages as read for a chat
-router.post('/mark-read', auth, async (req, res) => {
-  const waService = await getWaService();
-  const { jid } = req.body || {};
-  if (!jid) return res.status(400).json({ error: 'jid required' });
-
-  // Check permissions for agents
-  if (req.user?.role === 'agent') {
-    const meta = await ChatMeta.findOne({ jid, assignedTo: req.user.id });
-    if (!meta) return res.status(403).json({ error: 'Not allowed for this chat' });
-  }
-
-  try {
-    const r = await waService.markRead(jid);
-    res.json({ ok: true, ...r });
-  } catch (err) {
-    const msg = String(err?.message || 'failed');
-    const code = (
-      msg.includes('wa-not-connected') ||
-      msg.includes('invalid-jid') ||
-      msg.includes('wa-number-not-registered')
-    ) ? 400 : 500;
-    res.status(code).json({ error: msg });
-  }
 });
 
 export default router;
