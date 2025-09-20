@@ -30,13 +30,28 @@ router.post('/seed-admin-login', async (req, res) => {
 })
 
 router.post('/login', async (req, res) => {
-  const { email, password } = req.body;
-  const user = await User.findOne({ email });
-  if (!user) return res.status(400).json({ message: 'Invalid credentials' });
-  const ok = await user.comparePassword(password);
-  if (!ok) return res.status(400).json({ message: 'Invalid credentials' });
-  const token = jwt.sign({ id: user._id, role: user.role, firstName: user.firstName, lastName: user.lastName }, SECRET, { expiresIn: '7d' });
-  res.json({ token, user: { id: user._id, role: user.role, firstName: user.firstName, lastName: user.lastName, email: user.email } });
+  try{
+    const rawEmail = (req.body && req.body.email) || ''
+    const rawPassword = (req.body && req.body.password) || ''
+    const emailInput = String(rawEmail || '').trim()
+    const password = String(rawPassword || '')
+    if (!emailInput || !password) return res.status(400).json({ message: 'Invalid credentials' })
+    const emailLower = emailInput.toLowerCase()
+    // Try exact match first (fast, uses index), then lower-case, then case-insensitive regex
+    let user = await User.findOne({ email: emailInput })
+    if (!user) user = await User.findOne({ email: emailLower })
+    if (!user) {
+      const esc = emailInput.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      user = await User.findOne({ email: { $regex: `^${esc}$`, $options: 'i' } })
+    }
+    if (!user) return res.status(400).json({ message: 'Invalid credentials' })
+    const ok = await user.comparePassword(password)
+    if (!ok) return res.status(400).json({ message: 'Invalid credentials' })
+    const token = jwt.sign({ id: user._id, role: user.role, firstName: user.firstName, lastName: user.lastName }, SECRET, { expiresIn: '7d' })
+    return res.json({ token, user: { id: user._id, role: user.role, firstName: user.firstName, lastName: user.lastName, email: user.email } })
+  }catch(err){
+    return res.status(500).json({ message: 'Login failed' })
+  }
 });
 
 export default router;
