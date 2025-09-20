@@ -8,7 +8,7 @@ import mongoose from 'mongoose';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
-import { initSocket } from './modules/config/socket.js';
+import { initSocket, getIO } from './modules/config/socket.js';
 import productsRoutes from './modules/routes/products.js';
 import authRoutes from './modules/routes/auth.js';
 import userRoutes from './modules/routes/users.js';
@@ -68,7 +68,19 @@ app.use(morgan('dev'));
 app.get('/api/health', (_req, res) => {
   const dbState = mongoose.connection?.readyState ?? 0 // 0=disconnected,1=connected,2=connecting,3=disconnecting
   const stateMap = { 0:'disconnected', 1:'connected', 2:'connecting', 3:'disconnecting' }
-  res.json({ name: 'BuySial Commerce API', status: 'ok', db: { state: dbState, label: stateMap[dbState] || String(dbState) } });
+  const io = getIO()
+  const socketHealth = io ? {
+    connected: io.engine.clientsCount,
+    transports: ['websocket', 'polling'],
+    status: 'ok'
+  } : { status: 'not_initialized' }
+  res.json({
+    name: 'BuySial Commerce API',
+    status: 'ok',
+    db: { state: dbState, label: stateMap[dbState] || String(dbState) },
+    websocket: socketHealth,
+    timestamp: new Date().toISOString()
+  })
 });
 
 app.use('/api/auth', authRoutes);

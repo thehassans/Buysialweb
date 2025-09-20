@@ -59,8 +59,12 @@ export default function WhatsAppConnect(){
       path: '/socket.io',
       reconnection: true,
       reconnectionAttempts: Infinity,
-      reconnectionDelay: 800,
-      reconnectionDelayMax: 5000,
+      reconnectionDelay: 1000, // Start with 1s delay
+      reconnectionDelayMax: 10000, // Max 10s between attempts
+      timeout: 20000, // Connection timeout
+      forceNew: false,
+      // Add randomization to avoid thundering herd
+      randomizationFactor: 0.5,
     })
     socketRef.current = socket
     socket.on('status', (st)=>{
@@ -70,7 +74,21 @@ export default function WhatsAppConnect(){
     socket.on('qr', ({ qr })=>{
       try{ setQr(qr); lastQrAtRef.current = Date.now() }catch{}
     })
-    socket.on('connect_error', ()=>{
+    socket.on('connect', ()=>{
+      console.log('WhatsApp Connect socket connected')
+      setPolling(false) // Stop polling when connected
+    })
+    socket.on('disconnect', (reason)=>{
+      console.log('WhatsApp Connect socket disconnected:', reason)
+      // Resume polling if disconnected
+      if (reason === 'io server disconnect') {
+        // Server initiated disconnect, don't reconnect
+        return
+      }
+      // For other reasons, polling will resume
+    })
+    socket.on('connect_error', (error)=>{
+      console.warn('WhatsApp Connect socket error:', error.message)
       // fallback to gentle polling if socket cannot connect
       schedulePollSoon(3000)
     })

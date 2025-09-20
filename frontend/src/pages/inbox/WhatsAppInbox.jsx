@@ -450,14 +450,22 @@ export default function WhatsAppInbox(){
       path: '/socket.io',
       reconnection: true,
       reconnectionAttempts: Infinity,
-      reconnectionDelay: 800,
-      reconnectionDelayMax: 5000,
+      reconnectionDelay: 1000, // Start with 1s delay
+      reconnectionDelayMax: 10000, // Max 10s between attempts
+      timeout: 20000, // Connection timeout
+      forceNew: false,
+      // Add randomization to avoid thundering herd
+      randomizationFactor: 0.5,
     })
 
-    socket.on('connect', ()=> console.log('Socket connected'))
-    socket.on('disconnect', ()=> console.log('Socket disconnected'))
+    socket.on('connect', ()=> {
+      console.log('WhatsApp Inbox socket connected')
+    })
+    socket.on('disconnect', (reason)=> {
+      console.log('WhatsApp Inbox socket disconnected:', reason)
+    })
     socket.on('connect_error', (err)=>{
-      console.warn('Socket connect_error:', err?.message || err)
+      console.warn('WhatsApp Inbox socket error:', err?.message || err)
     })
 
     // Listen for new messages
