@@ -1,0 +1,14 @@
+{
+  "name": "BuySial Commerce",
+  "short_name": "BuySial",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "description": "BuySial Commerce dashboard",
+  "icons": [
+    { "src": "/BuySial2.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
