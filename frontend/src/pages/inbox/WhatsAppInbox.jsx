@@ -11,7 +11,7 @@ import { parsePhoneNumberFromString } from 'libphonenumber-js'
 // Start conservatively with concurrency=1 and a shared cooldown after 429/503/504
 let __mediaCooldownUntil = 0
 const __mediaPerKeyCooldown = new Map() // key -> until timestamp (ms)
-const __mediaQueue = { active: 0, limit: 1, queue: [], inFlight: new Map() }
+const __mediaQueue = { active: 0, limit: 2, queue: [], inFlight: new Map() } // Increased from 1 to 2
 function __dequeueMedia(){
   try{
     while (__mediaQueue.active < __mediaQueue.limit && __mediaQueue.queue.length){
@@ -1109,13 +1109,13 @@ export default function WhatsAppInbox(){
           // Set a global media cooldown so other downloads back off too
           const jitter = Math.floor(Math.random()*250)
           const waitMs = ra || delay
-          __mediaCooldownUntil = Date.now() + Math.min(Math.max(1200, waitMs) + jitter, 12000)
+          __mediaCooldownUntil = Date.now() + Math.min(Math.max(800, waitMs) + jitter, 8000) // Reduced from 12000
           // Also set per-key cooldown so we don't keep retrying the same media id
-          try{ __mediaPerKeyCooldown.set(key, Date.now() + Math.min(Math.max(2000, waitMs) + jitter, 15000)) }catch{}
+          try{ __mediaPerKeyCooldown.set(key, Date.now() + Math.min(Math.max(1500, waitMs) + jitter, 10000)) }catch{} // Reduced from 15000
           // Lower concurrency aggressively under pressure
           try{ if (__mediaQueue.limit > 1) __mediaQueue.limit = 1 }catch{}
-          await new Promise(res=> setTimeout(res, Math.max(300, waitMs)))
-          delay = Math.min(delay * 2, 4000)
+          await new Promise(res=> setTimeout(res, Math.max(200, waitMs))) // Reduced from 300
+          delay = Math.min(delay * 2, 3000) // Reduced from 4000
           tries++
           continue
         }
