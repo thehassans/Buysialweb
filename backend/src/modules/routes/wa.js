@@ -14,6 +14,26 @@ const TEMP_DIR = path.join(os.tmpdir(), 'buysial-wa');
 try { fs.mkdirSync(TEMP_DIR, { recursive: true }); } catch {}
 const upload = multer({ dest: TEMP_DIR });
 
+// Memory-safe media cache (LRU by total bytes) to prevent OOM from large media buffers
+const MAX_CACHE_BYTES = Number(process.env.WA_MEDIA_CACHE_MAX_BYTES || 150 * 1024 * 1024); // 150MB default
+const MAX_ITEM_BYTES = Number(process.env.WA_MEDIA_CACHE_ITEM_MAX_BYTES || 8 * 1024 * 1024); // 8MB per item max
+class MediaLRU {
+  constructor(maxBytes){ this.maxBytes = maxBytes; this.map = new Map(); this.bytes = 0; }
+  get(key){ const entry = this.map.get(key); if (!entry) return null; this.map.delete(key); this.map.set(key, entry); return entry.value; }
+  set(key, value){ const size = (value && value.buffer && value.buffer.length) || 0; if (size > MAX_ITEM_BYTES) return false; const existing = this.map.get(key); if (existing){ this.map.delete(key); this.bytes -= existing.size; } this.map.set(key, { value, size }); this.bytes += size; this.evict(); return true; }
+  has(key){ return this.map.has(key); }
+  evict(){
+    try{
+      while(this.bytes > this.maxBytes && this.map.size){
+        const it = this.map.entries().next();
+        if (it && it.value){ const [k, entry] = it.value; this.map.delete(k); this.bytes -= (entry?.size || 0); }
+        else break;
+      }
+    }catch{}
+  }
+}
+const mediaCache = (global.__waMediaLRU = global.__waMediaLRU || new MediaLRU(MAX_CACHE_BYTES));
+
 // Soft-delete (hide) a chat for User/Admin (does not affect agents)
 router.post('/chat-delete', auth, allowRoles('admin', 'user'), async (req, res) => {
   try{
@@ -405,11 +425,10 @@ router.get('/media', auth, async (req, res) => {
       return res.status(504).json({ error: 'media-timeout' })
     }
   }catch{}
-  const cache = (global.__waMediaCache = global.__waMediaCache || new Map())
-  const cached = cache.get(key)
-  // 1 day TTL cache in-memory
-  if (cached && (now - cached.at < 86400*1000)){
-    const m = cached.data
+  const cached = mediaCache.get(key)
+  // Serve from in-memory cache (LRU) if available
+  if (cached){
+    const m = cached
     if (m.fileName) res.setHeader('Content-Disposition', `inline; filename="${m.fileName}"`)
     res.setHeader('Cache-Control', 'public, max-age=86400, immutable')
     res.setHeader('Content-Type', m.mimeType || 'application/octet-stream')
@@ -420,7 +439,19 @@ router.get('/media', auth, async (req, res) => {
   if (inflight.has(key)){
     try{
       const m = await inflight.get(key)
-      if (!m) return res.status(404).json({ error: 'media not found' })
+      if (!m) {
+        // Even on 404, set a brief per-key cooldown to avoid tight loops across clients
+        try{
+          const failMap = (global.__waMediaFail = global.__waMediaFail || new Map())
+          const rec = failMap.get(key) || { count: 0, until: 0 }
+          rec.count = (rec.count||0) + 1
+          const waitSec = Math.min(60, 15 + rec.count*10)
+          rec.until = Date.now() + waitSec*1000
+          failMap.set(key, rec)
+          res.setHeader('Retry-After', String(waitSec))
+        }catch{}
+        return res.status(404).json({ error: 'media not found' })
+      }
       if (m.fileName) res.setHeader('Content-Disposition', `inline; filename="${m.fileName}"`)
       res.setHeader('Cache-Control', 'public, max-age=86400, immutable')
       res.setHeader('Content-Type', m.mimeType || 'application/octet-stream')
@@ -442,17 +473,37 @@ router.get('/media', auth, async (req, res) => {
       return res.status(504).json({ error: 'media-timeout' })
     }
   }
+  // Global concurrency guard to prevent overload from many distinct media downloads
+  const MAX_MEDIA_CONCURRENCY = Number(process.env.WA_MEDIA_MAX_CONCURRENCY || 3)
+  const conc = (global.__waMediaConc = global.__waMediaConc || { n: 0 })
+  if (conc.n >= MAX_MEDIA_CONCURRENCY){
+    try{ res.setHeader('Retry-After', '2') }catch{}
+    return res.status(429).json({ error: 'media-busy' })
+  }
   const p = (async ()=>{
     const m = await waService.getMedia(jid, id)
     return m
   })()
   inflight.set(key, p)
   try{
+    conc.n++
     const m = await p
-    if (!m) return res.status(404).json({ error: 'media not found' })
+    if (!m) {
+      // Even on 404, set a brief per-key cooldown to avoid tight loops across clients
+      try{
+        const failMap = (global.__waMediaFail = global.__waMediaFail || new Map())
+        const rec = failMap.get(key) || { count: 0, until: 0 }
+        rec.count = (rec.count||0) + 1
+        const waitSec = Math.min(60, 15 + rec.count*10)
+        rec.until = Date.now() + waitSec*1000
+        failMap.set(key, rec)
+        res.setHeader('Retry-After', String(waitSec))
+      }catch{}
+      return res.status(404).json({ error: 'media not found' })
+    }
     // Clear any failure cooldown for this key after success
     try{ const failMap = (global.__waMediaFail = global.__waMediaFail || new Map()); if (failMap.has(key)) failMap.delete(key) }catch{}
-    cache.set(key, { data: m, at: Date.now() })
+    mediaCache.set(key, m)
     if (m.fileName) res.setHeader('Content-Disposition', `inline; filename="${m.fileName}"`)
     res.setHeader('Cache-Control', 'public, max-age=86400, immutable')
     res.setHeader('Content-Type', m.mimeType || 'application/octet-stream')
@@ -473,6 +524,7 @@ router.get('/media', auth, async (req, res) => {
     }catch{}
     return res.status(504).json({ error: 'media-timeout' })
   }finally{
+    try{ conc.n = Math.max(0, (conc.n||0) - 1) }catch{}
     inflight.delete(key)
   }
 });
