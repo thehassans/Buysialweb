@@ -91,6 +91,8 @@ export default function WhatsAppInbox(){
   const [chatFilter, setChatFilter] = useState('all') // all | unread | read
   const [showNewChat, setShowNewChat] = useState(false)
   const [newChatPhone, setNewChatPhone] = useState('')
+  const [deleteMode, setDeleteMode] = useState(false)
+  const [deletingJid, setDeletingJid] = useState(null)
 
   const filteredChats = useMemo(()=>{
     const isUnread = (c)=> !!(c?.unread || (typeof c?.unreadCount === 'number' && c.unreadCount > 0))
@@ -108,6 +110,33 @@ export default function WhatsAppInbox(){
     setShowNewChat(false)
     setNewChatPhone('')
     navigate(`${location.pathname}?${qs.toString()}`, { replace:false })
+  }
+
+  // Soft-delete a chat from the User's view
+  async function deleteChat(jid){
+    try{
+      if (myRole !== 'user') return
+      if (!jid) return
+      const ok = confirm('Delete this chat from your view? You can still receive new messages from this contact.')
+      if (!ok) return
+      setDeletingJid(jid)
+      await apiPost('/api/wa/chat-delete', { jid })
+      // Optimistically remove from local list
+      setChats(prev => prev.filter(c => c.id !== jid))
+      if (activeJidRef.current === jid){
+        setMessages([])
+        // Remove jid from URL and clear active selection
+        const qs = new URLSearchParams(location.search)
+        qs.delete('jid')
+        navigate(`${location.pathname}?${qs.toString()}`.replace(/\?$/,''), { replace:true })
+      }
+      setToast('Chat deleted')
+      setTimeout(()=> setToast(''), 1600)
+    }catch(err){
+      alert(err?.message || 'Failed to delete chat')
+    }finally{
+      setDeletingJid(null)
+    }
   }
 
   // Replace an optimistic temp voice bubble with the server-confirmed one, keeping localUrl for immediate playback
@@ -1461,9 +1490,10 @@ export default function WhatsAppInbox(){
         <div className="wa-chatlist open" style={{borderRight:'none'}}>
           {/* New Chat (Mobile) - filters removed */}
           <div style={{position:'sticky', top:0, zIndex:1100, background:'var(--wa-header)', borderBottom:'1px solid var(--border)', padding:'8px 10px', display:'flex', alignItems:'center', justifyContent:'flex-end'}}>
-            {myRole !== 'agent' && (
-              <div>
+            {myRole === 'user' && (
+              <div style={{display:'flex', gap:6}}>
                 <button className="btn small" onClick={()=> setShowNewChat(s=>!s)}>New Chat</button>
+                <button className={`btn small ${deleteMode ? 'danger' : 'secondary'}`} onClick={()=> setDeleteMode(m=>!m)}>{deleteMode ? 'Done' : 'Delete'}</button>
               </div>
             )}
           </div>
@@ -1499,6 +1529,11 @@ export default function WhatsAppInbox(){
                   <div className="helper" style={{overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{c.preview || ''}</div>
                   {myRole !== 'agent' && c.owner?.name && <div className="helper" style={{fontSize:11}}>Assigned: {c.owner.name}</div>}
                 </div>
+                {myRole === 'user' && deleteMode && (
+                  <div style={{marginLeft:'auto'}}>
+                    <button className="btn danger small" onClick={(e)=>{ e.stopPropagation(); deleteChat(c.id) }} disabled={deletingJid===c.id}>{deletingJid===c.id ? 'Deleting…' : 'Delete'}</button>
+                  </div>
+                )}
                 {(c.unread || (typeof c.unreadCount==='number' && c.unreadCount>0)) ? <div style={{width:10,height:10,borderRadius:999,background:'var(--wa-accent)'}}/> : null}
               </div>
               )
@@ -1521,9 +1556,10 @@ export default function WhatsAppInbox(){
               <button key={k} className={`btn small ${chatFilter===k? 'success':'secondary'}`} onClick={()=> setChatFilter(k)}>{k[0].toUpperCase()+k.slice(1)}</button>
             ))}
           </div>
-          {myRole !== 'agent' && (
-            <div>
+          {myRole === 'user' && (
+            <div style={{display:'flex', gap:6}}>
               <button className="btn small" onClick={()=> setShowNewChat(s=>!s)}>New Chat</button>
+              <button className={`btn small ${deleteMode ? 'danger' : 'secondary'}`} onClick={()=> setDeleteMode(m=>!m)}>{deleteMode ? 'Done' : 'Delete'}</button>
             </div>
           )}
         </div>
@@ -1558,6 +1594,11 @@ export default function WhatsAppInbox(){
                   <div className="helper" style={{overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{c.preview || ''}</div>
                   {myRole !== 'agent' && c.owner?.name && <div className="helper" style={{fontSize:11}}>Assigned: {c.owner.name}</div>}
                 </div>
+                {myRole === 'user' && deleteMode && (
+                  <div style={{marginLeft:'auto'}}>
+                    <button className="btn danger small" onClick={(e)=>{ e.stopPropagation(); deleteChat(c.id) }} disabled={deletingJid===c.id}>{deletingJid===c.id ? 'Deleting…' : 'Delete'}</button>
+                  </div>
+                )}
                 {(c.unread || (typeof c.unreadCount==='number' && c.unreadCount>0)) ? <div style={{width:10,height:10,borderRadius:999,background:'var(--wa-accent)'}}/> : null}
               </div>
             )

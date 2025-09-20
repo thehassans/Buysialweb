@@ -14,6 +14,23 @@ const TEMP_DIR = path.join(os.tmpdir(), 'buysial-wa');
 try { fs.mkdirSync(TEMP_DIR, { recursive: true }); } catch {}
 const upload = multer({ dest: TEMP_DIR });
 
+// Soft-delete (hide) a chat for User/Admin (does not affect agents)
+router.post('/chat-delete', auth, allowRoles('admin', 'user'), async (req, res) => {
+  try{
+    const { jid } = req.body || {}
+    if (!jid) return res.status(400).json({ error: 'jid required' })
+    let meta = await ChatMeta.findOne({ jid })
+    if (!meta) meta = new ChatMeta({ jid })
+    meta.hiddenForUser = true
+    meta.deletedAt = new Date()
+    try{ meta.deletedBy = req.user?.id || null }catch{}
+    await meta.save()
+    return res.json({ ok: true })
+  }catch(err){
+    return res.status(500).json({ error: err?.message || 'failed' })
+  }
+})
+
 // Multer wrappers that always return JSON errors instead of HTML error pages
 function multerArray(field, max){
   return (req, res, next) => {
@@ -149,7 +166,11 @@ router.get('/chats', auth, async (req, res) => {
         const owners = await User.find({ _id: { $in: ownerIds } }, 'firstName lastName email').lean();
         ownersById = new Map(owners.map(u => [String(u._id), u]));
       }
-      const enriched = chats.map(c => {
+      // Hide chats that user has deleted (soft-hidden in ChatMeta)
+      const filteredList = (req.user?.role === 'user')
+        ? chats.filter(c => { const m = metaByJid.get(c.id); return !(m && m.hiddenForUser) })
+        : chats;
+      const enriched = filteredList.map(c => {
         const m = metaByJid.get(c.id);
         let owner = null;
         if (m && m.assignedTo) {
@@ -192,7 +213,10 @@ router.get('/chats', auth, async (req, res) => {
     const owners = await User.find({ _id: { $in: ownerIds } }, 'firstName lastName email').lean();
     ownersById = new Map(owners.map(u => [String(u._id), u]));
   }
-  const enriched = chats.map(c => {
+  const list = (req.user?.role === 'user')
+    ? chats.filter(c => { const m = metaByJid.get(c.id); return !(m && m.hiddenForUser) })
+    : chats;
+  const enriched = list.map(c => {
     const m = metaByJid.get(c.id);
     let owner = null;
     if (m && m.assignedTo) {
