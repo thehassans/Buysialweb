@@ -10,6 +10,7 @@ import { parsePhoneNumberFromString } from 'libphonenumber-js'
 // Global media fetch queue to avoid bursts that trigger 429s
 // Start conservatively with concurrency=1 and a shared cooldown after 429/503/504
 let __mediaCooldownUntil = 0
+const __mediaPerKeyCooldown = new Map() // key -> until timestamp (ms)
 const __mediaQueue = { active: 0, limit: 1, queue: [], inFlight: new Map() }
 function __dequeueMedia(){
   try{
@@ -1075,38 +1076,50 @@ export default function WhatsAppInbox(){
   }
 
   async function ensureMediaUrl(jid, id){
-    const key = `${jid}:${id}`
-    if (mediaUrlCacheRef.current.has(key)) return mediaUrlCacheRef.current.get(key)
-    const task = async ()=>{
-      let tries = 0
-      let delay = 400
-      for(;;){
-        try{
-          const blob = await apiGetBlob(`/api/wa/media?jid=${encodeURIComponent(jid)}&id=${encodeURIComponent(id)}`)
-          const url = URL.createObjectURL(blob)
-          mediaUrlCacheRef.current.set(key, url)
-          return url
-        }catch(e){
-          const status = e?.status
-          const ra = (typeof e?.retryAfterMs === 'number' && e.retryAfterMs > 0) ? e.retryAfterMs : 0
-          if ((status === 429 || status === 503 || status === 504) && tries < 3){
-            // Set a global media cooldown so other downloads back off too
-            const jitter = Math.floor(Math.random()*250)
-            const waitMs = ra || delay
-            __mediaCooldownUntil = Date.now() + Math.min(Math.max(1200, waitMs) + jitter, 12000)
-            // Lower concurrency aggressively under pressure
-            try{ if (__mediaQueue.limit > 1) __mediaQueue.limit = 1 }catch{}
-            await new Promise(res=> setTimeout(res, Math.max(300, waitMs)))
-            delay = Math.min(delay * 2, 4000)
-            tries++
-            continue
-          }
-          return null
+  const key = `${jid}:${id}`
+  try{
+    const until = __mediaPerKeyCooldown.get(key) || 0
+    if (until && Date.now() < until){
+      // Still cooling down for this key; skip fetch right now
+      return null
+    }
+  }catch{}
+  if (mediaUrlCacheRef.current.has(key)) return mediaUrlCacheRef.current.get(key)
+  const task = async ()=>{
+    let tries = 0
+    let delay = 400
+    for(;;){
+      try{
+        const blob = await apiGetBlob(`/api/wa/media?jid=${encodeURIComponent(jid)}&id=${encodeURIComponent(id)}`)
+        const url = URL.createObjectURL(blob)
+        mediaUrlCacheRef.current.set(key, url)
+        return url
+      }catch(e){
+        const status = e?.status
+        const ra = (typeof e?.retryAfterMs === 'number' && e.retryAfterMs > 0) ? e.retryAfterMs : 0
+        if ((status === 429 || status === 503 || status === 504) && tries < 2){
+          // Set a global media cooldown so other downloads back off too
+          const jitter = Math.floor(Math.random()*250)
+          const waitMs = ra || delay
+          __mediaCooldownUntil = Date.now() + Math.min(Math.max(1200, waitMs) + jitter, 12000)
+          // Also set per-key cooldown so we don't keep retrying the same media id
+          try{ __mediaPerKeyCooldown.set(key, Date.now() + Math.min(Math.max(2000, waitMs) + jitter, 15000)) }catch{}
+          // Lower concurrency aggressively under pressure
+          try{ if (__mediaQueue.limit > 1) __mediaQueue.limit = 1 }catch{}
+          await new Promise(res=> setTimeout(res, Math.max(300, waitMs)))
+          delay = Math.min(delay * 2, 4000)
+          tries++
+          continue
         }
+        // For non-retryable or exhausted attempts, set a short per-key cooldown to prevent tight loops
+        try{ __mediaPerKeyCooldown.set(key, Date.now() + 5000) }catch{}
+        return null
       }
     }
-    return scheduleMediaFetch(key, task)
   }
+  return scheduleMediaFetch(key, task)
+}
+ 
 
   function Ticks({ isMe, status }){
     if (!isMe) return null

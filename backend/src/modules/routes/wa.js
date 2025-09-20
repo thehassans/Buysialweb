@@ -337,15 +337,17 @@ router.post('/send-voice', auth, multerSingle('voice'), async (req, res) => {
     if (msg.includes('voice-canceled')) {
       return res.status(200).json({ ok: false, canceled: true });
     }
-    const code = (
-      msg.includes('wa-not-connected') ||
+    // Classify errors similarly to send-text: transient -> 503 with Retry-After, client issues -> 400, else 500
+    const isTransient = (msg.includes('wa-not-connected') || msg.startsWith('send-transient:'))
+    const isClientErr = (
       msg.includes('invalid-jid') ||
       msg.includes('wa-number-not-registered') ||
-      msg.startsWith('send-failed:') ||
-      msg.startsWith('send-transient:')
-    ) ? 400 : 500;
+      msg.startsWith('send-failed:')
+    )
+    const code = isTransient ? 503 : (isClientErr ? 400 : 500)
     try{ console.error('[send-voice] error', { jid, msg, code }) }catch{}
-    res.status(code).json({ ok: false, error: msg });
+    if (isTransient){ try{ res.setHeader('Retry-After', '2') }catch{} }
+    res.status(code).json({ ok: false, error: msg, transient: !!isTransient });
   }
 });
 
@@ -369,6 +371,16 @@ router.get('/media', auth, async (req, res) => {
   }
   const key = `${jid}:${id}`
   const now = Date.now()
+  // If this key recently failed, short-circuit with a Retry-After to prevent hammering upstream
+  try{
+    const failMap = (global.__waMediaFail = global.__waMediaFail || new Map())
+    const rec = failMap.get(key)
+    if (rec && typeof rec.until === 'number' && now < rec.until){
+      const waitSec = Math.ceil((rec.until - now)/1000)
+      try{ res.setHeader('Retry-After', String(Math.max(5, waitSec))) }catch{}
+      return res.status(504).json({ error: 'media-timeout' })
+    }
+  }catch{}
   const cache = (global.__waMediaCache = global.__waMediaCache || new Map())
   const cached = cache.get(key)
   // 1 day TTL cache in-memory
@@ -393,7 +405,16 @@ router.get('/media', auth, async (req, res) => {
     }catch(err){
       const msg = String(err?.message || 'failed')
       try{ console.error('[wa media] inflight error', { jid, id, msg }) }catch{}
-      try{ res.setHeader('Retry-After', '10') }catch{}
+      // Escalate per-key cooldown progressively
+      try{
+        const failMap = (global.__waMediaFail = global.__waMediaFail || new Map())
+        const rec = failMap.get(key) || { count: 0, until: 0 }
+        rec.count = (rec.count||0) + 1
+        const waitSec = Math.min(60, 10 + rec.count*10)
+        rec.until = Date.now() + waitSec*1000
+        failMap.set(key, rec)
+        res.setHeader('Retry-After', String(waitSec))
+      }catch{}
       return res.status(504).json({ error: 'media-timeout' })
     }
   }
@@ -405,6 +426,8 @@ router.get('/media', auth, async (req, res) => {
   try{
     const m = await p
     if (!m) return res.status(404).json({ error: 'media not found' })
+    // Clear any failure cooldown for this key after success
+    try{ const failMap = (global.__waMediaFail = global.__waMediaFail || new Map()); if (failMap.has(key)) failMap.delete(key) }catch{}
     cache.set(key, { data: m, at: Date.now() })
     if (m.fileName) res.setHeader('Content-Disposition', `inline; filename="${m.fileName}"`)
     res.setHeader('Cache-Control', 'public, max-age=86400, immutable')
@@ -414,7 +437,16 @@ router.get('/media', auth, async (req, res) => {
   }catch(err){
     const msg = String(err?.message || 'failed')
     try{ console.error('[wa media] error', { jid, id, msg }) }catch{}
-    try{ res.setHeader('Retry-After', '10') }catch{}
+    // Escalate per-key cooldown progressively
+    try{
+      const failMap = (global.__waMediaFail = global.__waMediaFail || new Map())
+      const rec = failMap.get(key) || { count: 0, until: 0 }
+      rec.count = (rec.count||0) + 1
+      const waitSec = Math.min(60, 10 + rec.count*10)
+      rec.until = Date.now() + waitSec*1000
+      failMap.set(key, rec)
+      res.setHeader('Retry-After', String(waitSec))
+    }catch{}
     return res.status(504).json({ error: 'media-timeout' })
   }finally{
     inflight.delete(key)
