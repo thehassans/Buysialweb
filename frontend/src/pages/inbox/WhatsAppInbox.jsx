@@ -8,7 +8,9 @@ import { parsePhoneNumberFromString } from 'libphonenumber-js'
 // Avatar UI moved to src/ui/Avatar.jsx
 
 // Global media fetch queue to avoid bursts that trigger 429s
-const __mediaQueue = { active: 0, limit: 2, queue: [], inFlight: new Map() }
+// Start conservatively with concurrency=1 and a shared cooldown after 429/503/504
+let __mediaCooldownUntil = 0
+const __mediaQueue = { active: 0, limit: 1, queue: [], inFlight: new Map() }
 function __dequeueMedia(){
   try{
     while (__mediaQueue.active < __mediaQueue.limit && __mediaQueue.queue.length){
@@ -21,6 +23,13 @@ function scheduleMediaFetch(key, fn){
   if (__mediaQueue.inFlight.has(key)) return __mediaQueue.inFlight.get(key)
   const p = new Promise((resolve, reject)=>{
     const run = async ()=>{
+      // Honor global cooldown between media downloads
+      try{
+        const now = Date.now()
+        if (__mediaCooldownUntil && now < __mediaCooldownUntil){
+          await new Promise(r => setTimeout(r, __mediaCooldownUntil - now))
+        }
+      }catch{}
       __mediaQueue.active++
       try{ resolve(await fn()) }
       catch(e){ reject(e) }
@@ -1078,10 +1087,17 @@ export default function WhatsAppInbox(){
           mediaUrlCacheRef.current.set(key, url)
           return url
         }catch(e){
-          const msg = String(e?.message || '')
-          if (msg.includes('429') && tries < 3){
-            await new Promise(res=> setTimeout(res, delay))
-            delay = Math.min(delay * 2, 3000)
+          const status = e?.status
+          const ra = (typeof e?.retryAfterMs === 'number' && e.retryAfterMs > 0) ? e.retryAfterMs : 0
+          if ((status === 429 || status === 503 || status === 504) && tries < 3){
+            // Set a global media cooldown so other downloads back off too
+            const jitter = Math.floor(Math.random()*250)
+            const waitMs = ra || delay
+            __mediaCooldownUntil = Date.now() + Math.min(Math.max(1200, waitMs) + jitter, 12000)
+            // Lower concurrency aggressively under pressure
+            try{ if (__mediaQueue.limit > 1) __mediaQueue.limit = 1 }catch{}
+            await new Promise(res=> setTimeout(res, Math.max(300, waitMs)))
+            delay = Math.min(delay * 2, 4000)
             tries++
             continue
           }
