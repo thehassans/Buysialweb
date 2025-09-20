@@ -63,7 +63,13 @@ const corsOptions = {
 }
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '5mb' }));
-app.use(morgan('dev'));
+// Reduce log overhead in production; control via HTTP_LOG env: 'none'|'false' to disable, else morgan format (e.g. 'tiny','dev')
+try{
+  const HTTP_LOG = String(process.env.HTTP_LOG || (process.env.NODE_ENV === 'production' ? 'tiny' : 'dev')).toLowerCase();
+  if (HTTP_LOG && HTTP_LOG !== 'none' && HTTP_LOG !== 'false'){
+    app.use(morgan(HTTP_LOG));
+  }
+}catch{ /* morgan disabled if misconfigured */ }
 
 app.get('/api/health', (_req, res) => {
   const dbState = mongoose.connection?.readyState ?? 0 // 0=disconnected,1=connected,2=connecting,3=disconnecting
@@ -120,6 +126,11 @@ try {
     }catch{}
   }
   if (serveStatic && CLIENT_DIST && INDEX_HTML){
+    // Long-lived caching for build assets (filenames include content hashes)
+    app.use('/assets', (req, res, next) => {
+      try{ res.setHeader('Cache-Control', 'public, max-age=604800, immutable') }catch{}
+      next()
+    })
     app.use(express.static(CLIENT_DIST));
     console.log('Serving frontend from:', CLIENT_DIST);
   } else if (!serveStatic) {

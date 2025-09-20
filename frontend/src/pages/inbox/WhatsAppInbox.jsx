@@ -83,7 +83,7 @@ export default function WhatsAppInbox(){
   const [notifyGranted, setNotifyGranted] = useState(()=> (typeof Notification!=='undefined' && Notification.permission==='granted'))
   const [soundOn, setSoundOn] = useState(()=>{ try{ const v=localStorage.getItem('wa_sound'); return v? v!=='false' : true }catch{ return true } })
   const chatsLoadAtRef = useRef(0)
-  const messagesLoadRef = useRef({ inFlight: new Map(), lastAt: new Map(), pending: new Map(), timers: new Map(), minInterval: 8000 })
+  const messagesLoadRef = useRef({ inFlight: new Map(), lastAt: new Map(), pending: new Map(), timers: new Map(), minInterval: 12000 })
   const activeJidRef = useRef(null)
   const chatsRefreshTimerRef = useRef(null)
 
@@ -247,7 +247,7 @@ export default function WhatsAppInbox(){
 
   async function loadChats(){
     const now = Date.now()
-    if (now - (chatsLoadAtRef.current || 0) < 4000) return
+    if (now - (chatsLoadAtRef.current || 0) < 8000) return
     chatsLoadAtRef.current = now
     try{ setChats(await apiGet('/api/wa/chats')) }catch(_e){}
   }
@@ -474,17 +474,17 @@ export default function WhatsAppInbox(){
   // Real-time updates with WebSockets (create once)
   useEffect(()=>{
     const socket = io(API_BASE, {
-      transports: ['websocket','polling'],
+      transports: ['websocket'],
       withCredentials: true,
       path: '/socket.io',
       reconnection: true,
       reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000, // Start with 1s delay
-      reconnectionDelayMax: 10000, // Max 10s between attempts
+      reconnectionDelay: 2000, // Start with 2s delay
+      reconnectionDelayMax: 30000, // Max 30s between attempts
       timeout: 20000, // Connection timeout
       forceNew: false,
       // Add randomization to avoid thundering herd
-      randomizationFactor: 0.5,
+      randomizationFactor: 0.7,
     })
 
     socket.on('connect', ()=> {

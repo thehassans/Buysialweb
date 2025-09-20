@@ -14,5 +14,7 @@ const WaMessageSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 WaMessageSchema.index({ jid: 1, 'key.id': 1 }, { unique: true });
+// Optimize chronological paging by chat
+WaMessageSchema.index({ jid: 1, messageTimestamp: -1 });
 
 export default mongoose.models.WaMessage || mongoose.model('WaMessage', WaMessageSchema);

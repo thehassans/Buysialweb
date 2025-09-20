@@ -155,7 +155,7 @@ router.get('/chats', auth, async (req, res) => {
   const uid = String(req.user?.id || 'anon')
   const cacheKey = `chats:${uid}`
   const now = Date.now()
-  const ttlMs = 2000
+  const ttlMs = Number(process.env.WA_CHATS_TTL_MS || 6000)
   try{
     const cached = (global.__waChatCache = global.__waChatCache || new Map()).get(cacheKey)
     if (cached && (now - cached.at < ttlMs)){
@@ -261,7 +261,7 @@ router.get('/messages', auth, async (req, res) => {
   const uid = String(req.user?.id || 'anon')
   const key = `msgs:${uid}:${jid}:${beforeId||''}:${limit||''}`
   const now = Date.now()
-  const ttlMs = 4000
+  const ttlMs = Number(process.env.WA_MESSAGES_TTL_MS || 8000)
   try{
     const cache = (global.__waMsgCache = global.__waMsgCache || new Map())
     const cached = cache.get(key)
@@ -410,9 +410,19 @@ router.get('/media', auth, async (req, res) => {
   const { jid, id } = req.query || {};
   if (!jid || !id) return res.status(400).json({ error: 'jid and id required' });
   if (req.user?.role === 'agent') {
-    const meta = await ChatMeta.findOne({ jid, assignedTo: req.user.id });
+    const meta = await ChatMeta.findOne({ jid, assignedTo: req.user.id }).lean();
     if (!meta) return res.status(403).json({ error: 'Not allowed for this chat' });
   }
+  // Conditional request support to reduce bandwidth and CPU on repeat loads
+  const etagVal = `"wa:${id}"`
+  try{
+    const inm = req.headers && (req.headers['if-none-match'] || req.headers['If-None-Match'])
+    if (inm && String(inm) === etagVal){
+      res.setHeader('ETag', etagVal)
+      res.setHeader('Cache-Control', 'public, max-age=86400, immutable')
+      return res.status(304).end()
+    }
+  }catch{}
   const key = `${jid}:${id}`
   const now = Date.now()
   // If this key recently failed, short-circuit with a Retry-After to prevent hammering upstream
@@ -432,6 +442,7 @@ router.get('/media', auth, async (req, res) => {
     if (m.fileName) res.setHeader('Content-Disposition', `inline; filename="${m.fileName}"`)
     res.setHeader('Cache-Control', 'public, max-age=86400, immutable')
     res.setHeader('Content-Type', m.mimeType || 'application/octet-stream')
+    try{ res.setHeader('ETag', etagVal) }catch{}
     try{ res.setHeader('Content-Length', String(m.buffer?.length || 0)) }catch{}
     return res.end(m.buffer)
   }
@@ -455,6 +466,7 @@ router.get('/media', auth, async (req, res) => {
       if (m.fileName) res.setHeader('Content-Disposition', `inline; filename="${m.fileName}"`)
       res.setHeader('Cache-Control', 'public, max-age=86400, immutable')
       res.setHeader('Content-Type', m.mimeType || 'application/octet-stream')
+      try{ res.setHeader('ETag', etagVal) }catch{}
       try{ res.setHeader('Content-Length', String(m.buffer?.length || 0)) }catch{}
       return res.end(m.buffer)
     }catch(err){
@@ -507,6 +519,7 @@ router.get('/media', auth, async (req, res) => {
     if (m.fileName) res.setHeader('Content-Disposition', `inline; filename="${m.fileName}"`)
     res.setHeader('Cache-Control', 'public, max-age=86400, immutable')
     res.setHeader('Content-Type', m.mimeType || 'application/octet-stream')
+    try{ res.setHeader('ETag', etagVal) }catch{}
     try{ res.setHeader('Content-Length', String(m.buffer?.length || 0)) }catch{}
     return res.end(m.buffer)
   }catch(err){

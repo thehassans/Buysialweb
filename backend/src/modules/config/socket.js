@@ -16,15 +16,27 @@ class SocketManager {
       ? { origin: '*', methods: ['GET','POST'] }
       : { origin: raw, methods: ['GET','POST'], credentials: true }
 
+    // Environment-driven tuning for lower baseline load
+    const wsOnly = String(process.env.SOCKET_WEBSOCKET_ONLY || 'true').toLowerCase() === 'true'
+    const transports = wsOnly ? ['websocket'] : ['websocket', 'polling']
+    const allowEIO3 = String(process.env.SOCKET_ALLOW_EIO3 || 'false').toLowerCase() === 'true'
+    const pingInterval = Number(process.env.SOCKET_PING_INTERVAL_MS || 30000) // default 30s
+    const pingTimeout = Number(process.env.SOCKET_PING_TIMEOUT_MS || 70000) // default 70s
+    const connectTimeout = Number(process.env.SOCKET_CONNECT_TIMEOUT_MS || 20000) // default 20s
+    const maxHttpBufferSize = Number(process.env.SOCKET_MAX_BUFFER_BYTES || 5e5) // default ~500KB
+    // Compression trades CPU for bandwidth; default disabled for minimal CPU
+    const perMessageDeflate = String(process.env.SOCKET_COMPRESS || 'false').toLowerCase() === 'true'
+
     this.io = new Server(server, {
       cors: corsOpts,
       path: '/socket.io',
-      transports: ['websocket', 'polling'],
-      allowEIO3: true,
-      pingTimeout: 60000, // Increased to 60s for unstable connections
-      pingInterval: 25000, // Increased to 25s for less frequent pings
-      connectTimeout: 20000, // 20s to establish connection
-      maxHttpBufferSize: 1e6, // 1MB buffer for large messages
+      transports,
+      allowEIO3,
+      pingTimeout,
+      pingInterval,
+      connectTimeout,
+      maxHttpBufferSize,
+      perMessageDeflate,
       // Force WebSocket transport when possible
       forceNew: false,
       // Upgrade timeout for WebSocket handshake
