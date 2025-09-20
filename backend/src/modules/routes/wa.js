@@ -281,11 +281,13 @@ router.post('/send-text', auth, async (req, res) => {
       try{ console.error('[send-text] error', { jid, msg, code }) }catch{}
       const body = { error: msg };
       if (isTransient) body.transient = true;
+      try{ if (isTransient) res.setHeader('Retry-After', '2') }catch{}
       res.status(code).json(body);
     }
   }catch(outerErr){
     const msg = String(outerErr?.message || 'failed');
     try{ console.error('[send-text] outer error', { msg }) }catch{}
+    try{ res.setHeader('Retry-After', '2') }catch{}
     return res.status(500).json({ error: `send-transient:${msg}` });
   }
 });
@@ -391,6 +393,7 @@ router.get('/media', auth, async (req, res) => {
     }catch(err){
       const msg = String(err?.message || 'failed')
       try{ console.error('[wa media] inflight error', { jid, id, msg }) }catch{}
+      try{ res.setHeader('Retry-After', '10') }catch{}
       return res.status(504).json({ error: 'media-timeout' })
     }
   }
@@ -411,6 +414,7 @@ router.get('/media', auth, async (req, res) => {
   }catch(err){
     const msg = String(err?.message || 'failed')
     try{ console.error('[wa media] error', { jid, id, msg }) }catch{}
+    try{ res.setHeader('Retry-After', '10') }catch{}
     return res.status(504).json({ error: 'media-timeout' })
   }finally{
     inflight.delete(key)
