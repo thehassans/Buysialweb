@@ -5,11 +5,14 @@ import App from './App.jsx'
 import './styles.css'
 import 'react-phone-number-input/style.css'
 import { bootstrapBranding } from './util/branding.js'
+import { ToastProvider } from './ui/Toast.jsx'
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <BrowserRouter>
-      <App />
+      <ToastProvider>
+        <App />
+      </ToastProvider>
     </BrowserRouter>
   </React.StrictMode>
 )

@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react'
 import PasswordInput from '../../components/PasswordInput.jsx'
 import { API_BASE, apiGet, apiPost } from '../../api.js'
+import { useToast } from '../../ui/Toast.jsx'
 
 export default function UserLogin(){
+  const toast = useToast()
   const [email,setEmail]=useState('')
   const [password,setPassword]=useState('')
   const [loading,setLoading]=useState(false)
@@ -64,13 +66,14 @@ export default function UserLogin(){
       else if (data.user.role === 'driver') location.href = '/driver'
       else location.href = '/user'
     }catch(e){
-      const raw = String(e?.message || '')
-      if (/(429|Too Many Requests)/i.test(raw)){
-        alert('Too many requests. Please wait a few seconds and try again.')
-      } else if (/Invalid|failed|HTTP\s*400/i.test(raw)){
-        alert('Login failed. Please check your email/password and try again.')
+      const status = e?.status
+      const msg = String(e?.message || '')
+      if (status === 429){
+        toast.info('Too many requests. Please wait a few seconds and try again.')
+      } else if (status === 400 || /invalid|incorrect|credentials|password|email/i.test(msg)){
+        toast.error('Incorrect email or password')
       } else {
-        alert('Login failed')
+        toast.error(msg || 'Login failed')
       }
     }finally{ setLoading(false) }
   }
@@ -113,7 +116,7 @@ export default function UserLogin(){
             <PasswordInput value={password} onChange={setPassword} autoComplete="current-password"/>
           </div>
           <div style={{textAlign:'right',marginTop:2}}>
-            <a href="#" onClick={(e)=>{e.preventDefault(); alert('Forgot password coming soon')}}>Forgot password?</a>
+            <a href="#" onClick={(e)=>{e.preventDefault(); toast.info('Forgot password coming soon') }}>Forgot password?</a>
           </div>
 
           <button className="btn" style={{marginTop:4}} disabled={loading}>

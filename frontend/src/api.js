@@ -19,12 +19,17 @@ function authHeader(){
   return token ? { 'Authorization': `Bearer ${token}` } : {};
 }
 
+// Best-effort toast helpers (no hard dependency)
+function toastError(message){ try{ window.__toast && window.__toast.error && window.__toast.error(message) }catch{} }
+function toastInfo(message){ try{ window.__toast && window.__toast.info && window.__toast.info(message) }catch{} }
+
 async function handle(res){
   if (res.ok) return res;
   // Centralize auth failures: clear token and redirect to login
   if (res.status === 401) {
     try { localStorage.removeItem('token'); localStorage.removeItem('me'); } catch {}
     if (!location.pathname.startsWith('/login')) {
+      toastError('Your session has expired. Please log in again.')
       location.href = '/login';
     }
   }
@@ -46,6 +51,12 @@ async function handle(res){
           if (ms) e.retryAfterMs = ms
         }
       }catch{}
+      // Show a toast for JSON errors (except when login page might intentionally handle)
+      const suppressLoginToast = typeof res.url === 'string' && /\/api\/auth\/login(\?|$)/.test(res.url)
+      if (!suppressLoginToast){
+        if (res.status === 429){ toastInfo(msg || 'Too many requests. Please try again shortly.') }
+        else { toastError(msg) }
+      }
       throw e;
     }
   }
@@ -69,6 +80,11 @@ async function handle(res){
       if (ms) e.retryAfterMs = ms
     }
   }catch{}
+  const suppressLoginToast = typeof res.url === 'string' && /\/api\/auth\/login(\?|$)/.test(res.url)
+  if (!suppressLoginToast){
+    if (res.status === 429){ toastInfo(text || 'Too many requests. Please try again shortly.') }
+    else { toastError(text) }
+  }
   throw e;
 }
 
