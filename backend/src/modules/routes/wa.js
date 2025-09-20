@@ -7,6 +7,7 @@ import fs from 'fs';
 import ChatMeta from '../models/ChatMeta.js';
 import Setting from '../models/Setting.js';
 import User from '../models/User.js';
+import rateLimit from '../middleware/rateLimit.js';
 
 const router = Router();
 // Ensure upload temp directory exists to avoid ENOENT on some hosts
@@ -14,25 +15,10 @@ const TEMP_DIR = path.join(os.tmpdir(), 'buysial-wa');
 try { fs.mkdirSync(TEMP_DIR, { recursive: true }); } catch {}
 const upload = multer({ dest: TEMP_DIR });
 
-// Memory-safe media cache (LRU by total bytes) to prevent OOM from large media buffers
-const MAX_CACHE_BYTES = Number(process.env.WA_MEDIA_CACHE_MAX_BYTES || 150 * 1024 * 1024); // 150MB default
-const MAX_ITEM_BYTES = Number(process.env.WA_MEDIA_CACHE_ITEM_MAX_BYTES || 8 * 1024 * 1024); // 8MB per item max
-class MediaLRU {
-  constructor(maxBytes){ this.maxBytes = maxBytes; this.map = new Map(); this.bytes = 0; }
-  get(key){ const entry = this.map.get(key); if (!entry) return null; this.map.delete(key); this.map.set(key, entry); return entry.value; }
-  set(key, value){ const size = (value && value.buffer && value.buffer.length) || 0; if (size > MAX_ITEM_BYTES) return false; const existing = this.map.get(key); if (existing){ this.map.delete(key); this.bytes -= existing.size; } this.map.set(key, { value, size }); this.bytes += size; this.evict(); return true; }
-  has(key){ return this.map.has(key); }
-  evict(){
-    try{
-      while(this.bytes > this.maxBytes && this.map.size){
-        const it = this.map.entries().next();
-        if (it && it.value){ const [k, entry] = it.value; this.map.delete(k); this.bytes -= (entry?.size || 0); }
-        else break;
-      }
-    }catch{}
-  }
-}
-const mediaCache = (global.__waMediaLRU = global.__waMediaLRU || new MediaLRU(MAX_CACHE_BYTES));
+// Global, conservative rate limit for WA API to avoid hammering
+const GLOBAL_WINDOW = Math.max(500, Number(process.env.WA_RATE_WINDOW_MS || 2000));
+const GLOBAL_MAX = Math.max(5, Number(process.env.WA_RATE_MAX || 20));
+router.use(rateLimit({ windowMs: GLOBAL_WINDOW, max: GLOBAL_MAX }));
 
 // Soft-delete (hide) a chat for User/Admin (does not affect agents)
 router.post('/chat-delete', auth, allowRoles('admin', 'user'), async (req, res) => {
@@ -155,7 +141,7 @@ router.get('/chats', auth, async (req, res) => {
   const uid = String(req.user?.id || 'anon')
   const cacheKey = `chats:${uid}`
   const now = Date.now()
-  const ttlMs = Number(process.env.WA_CHATS_TTL_MS || 6000)
+  const ttlMs = 2000
   try{
     const cached = (global.__waChatCache = global.__waChatCache || new Map()).get(cacheKey)
     if (cached && (now - cached.at < ttlMs)){
@@ -261,7 +247,7 @@ router.get('/messages', auth, async (req, res) => {
   const uid = String(req.user?.id || 'anon')
   const key = `msgs:${uid}:${jid}:${beforeId||''}:${limit||''}`
   const now = Date.now()
-  const ttlMs = Number(process.env.WA_MESSAGES_TTL_MS || 8000)
+  const ttlMs = 4000
   try{
     const cache = (global.__waMsgCache = global.__waMsgCache || new Map())
     const cached = cache.get(key)
@@ -346,7 +332,13 @@ router.post('/send-media', auth, multerArray('files', 30), async (req, res) => {
     if (!meta) return res.status(403).json({ error: 'Not allowed for this chat' });
   }
   try{
-    const r = await waService.sendMedia(jid, req.files || []);
+    // Per-jid serialization to minimize concurrent media sends to same target
+    const chains = (global.__waSendChains = global.__waSendChains || new Map());
+    const key = String(jid)
+    const last = chains.get(key) || Promise.resolve()
+    const p = last.then(() => waService.sendMedia(jid, req.files || []))
+    chains.set(key, p.finally(() => { if (chains.get(key) === p) chains.delete(key) }))
+    const r = await p
     res.json(r);
   }catch(err){
     const msg = String(err?.message || 'failed');
@@ -374,7 +366,13 @@ router.post('/send-voice', auth, multerSingle('voice'), async (req, res) => {
   // attach token so service can make it cancelable
   if (voiceToken) req.file.voiceToken = String(voiceToken);
   try {
-    const r = await waService.sendVoice(jid, req.file);
+    // Per-jid serialization to minimize concurrent voice sends to same target
+    const chains = (global.__waSendChains = global.__waSendChains || new Map());
+    const key = String(jid)
+    const last = chains.get(key) || Promise.resolve()
+    const p = last.then(() => waService.sendVoice(jid, req.file))
+    chains.set(key, p.finally(() => { if (chains.get(key) === p) chains.delete(key) }))
+    const r = await p
     res.json(r);
   } catch (err) {
     const msg = String(err?.message || 'failed');
@@ -405,24 +403,17 @@ router.post('/cancel-voice', auth, async (req, res) => {
 });
 
 // Download media for a specific message
-router.get('/media', auth, async (req, res) => {
+// Stricter rate limit for media fetches (heavier upstream load)
+const MEDIA_WINDOW = Math.max(2000, Number(process.env.WA_MEDIA_WINDOW_MS || 10000));
+const MEDIA_MAX = Math.max(2, Number(process.env.WA_MEDIA_MAX || 5));
+router.get('/media', auth, rateLimit({ windowMs: MEDIA_WINDOW, max: MEDIA_MAX }), async (req, res) => {
   const waService = await getWaService();
   const { jid, id } = req.query || {};
   if (!jid || !id) return res.status(400).json({ error: 'jid and id required' });
   if (req.user?.role === 'agent') {
-    const meta = await ChatMeta.findOne({ jid, assignedTo: req.user.id }).lean();
+    const meta = await ChatMeta.findOne({ jid, assignedTo: req.user.id });
     if (!meta) return res.status(403).json({ error: 'Not allowed for this chat' });
   }
-  // Conditional request support to reduce bandwidth and CPU on repeat loads
-  const etagVal = `"wa:${id}"`
-  try{
-    const inm = req.headers && (req.headers['if-none-match'] || req.headers['If-None-Match'])
-    if (inm && String(inm) === etagVal){
-      res.setHeader('ETag', etagVal)
-      res.setHeader('Cache-Control', 'public, max-age=86400, immutable')
-      return res.status(304).end()
-    }
-  }catch{}
   const key = `${jid}:${id}`
   const now = Date.now()
   // If this key recently failed, short-circuit with a Retry-After to prevent hammering upstream
@@ -435,14 +426,14 @@ router.get('/media', auth, async (req, res) => {
       return res.status(504).json({ error: 'media-timeout' })
     }
   }catch{}
-  const cached = mediaCache.get(key)
-  // Serve from in-memory cache (LRU) if available
-  if (cached){
-    const m = cached
+  const cache = (global.__waMediaCache = global.__waMediaCache || new Map())
+  const cached = cache.get(key)
+  // 1 day TTL cache in-memory
+  if (cached && (now - cached.at < 86400*1000)){
+    const m = cached.data
     if (m.fileName) res.setHeader('Content-Disposition', `inline; filename="${m.fileName}"`)
     res.setHeader('Cache-Control', 'public, max-age=86400, immutable')
     res.setHeader('Content-Type', m.mimeType || 'application/octet-stream')
-    try{ res.setHeader('ETag', etagVal) }catch{}
     try{ res.setHeader('Content-Length', String(m.buffer?.length || 0)) }catch{}
     return res.end(m.buffer)
   }
@@ -450,23 +441,10 @@ router.get('/media', auth, async (req, res) => {
   if (inflight.has(key)){
     try{
       const m = await inflight.get(key)
-      if (!m) {
-        // Even on 404, set a brief per-key cooldown to avoid tight loops across clients
-        try{
-          const failMap = (global.__waMediaFail = global.__waMediaFail || new Map())
-          const rec = failMap.get(key) || { count: 0, until: 0 }
-          rec.count = (rec.count||0) + 1
-          const waitSec = Math.min(60, 15 + rec.count*10)
-          rec.until = Date.now() + waitSec*1000
-          failMap.set(key, rec)
-          res.setHeader('Retry-After', String(waitSec))
-        }catch{}
-        return res.status(404).json({ error: 'media not found' })
-      }
+      if (!m) return res.status(404).json({ error: 'media not found' })
       if (m.fileName) res.setHeader('Content-Disposition', `inline; filename="${m.fileName}"`)
       res.setHeader('Cache-Control', 'public, max-age=86400, immutable')
       res.setHeader('Content-Type', m.mimeType || 'application/octet-stream')
-      try{ res.setHeader('ETag', etagVal) }catch{}
       try{ res.setHeader('Content-Length', String(m.buffer?.length || 0)) }catch{}
       return res.end(m.buffer)
     }catch(err){
@@ -485,41 +463,33 @@ router.get('/media', auth, async (req, res) => {
       return res.status(504).json({ error: 'media-timeout' })
     }
   }
-  // Global concurrency guard to prevent overload from many distinct media downloads
-  const MAX_MEDIA_CONCURRENCY = Number(process.env.WA_MEDIA_MAX_CONCURRENCY || 3)
-  const conc = (global.__waMediaConc = global.__waMediaConc || { n: 0 })
-  if (conc.n >= MAX_MEDIA_CONCURRENCY){
-    try{ res.setHeader('Retry-After', '2') }catch{}
-    return res.status(429).json({ error: 'media-busy' })
-  }
   const p = (async ()=>{
     const m = await waService.getMedia(jid, id)
     return m
   })()
   inflight.set(key, p)
   try{
-    conc.n++
     const m = await p
     if (!m) {
-      // Even on 404, set a brief per-key cooldown to avoid tight loops across clients
+      // Negative cache for not-found to avoid repeated upstream work
       try{
         const failMap = (global.__waMediaFail = global.__waMediaFail || new Map())
         const rec = failMap.get(key) || { count: 0, until: 0 }
         rec.count = (rec.count||0) + 1
-        const waitSec = Math.min(60, 15 + rec.count*10)
+        const waitSec = Math.min(60, 5 + rec.count*5)
         rec.until = Date.now() + waitSec*1000
         failMap.set(key, rec)
         res.setHeader('Retry-After', String(waitSec))
       }catch{}
+      try{ res.setHeader('Cache-Control', 'public, max-age=30') }catch{}
       return res.status(404).json({ error: 'media not found' })
     }
     // Clear any failure cooldown for this key after success
     try{ const failMap = (global.__waMediaFail = global.__waMediaFail || new Map()); if (failMap.has(key)) failMap.delete(key) }catch{}
-    mediaCache.set(key, m)
+    cache.set(key, { data: m, at: Date.now() })
     if (m.fileName) res.setHeader('Content-Disposition', `inline; filename="${m.fileName}"`)
     res.setHeader('Cache-Control', 'public, max-age=86400, immutable')
     res.setHeader('Content-Type', m.mimeType || 'application/octet-stream')
-    try{ res.setHeader('ETag', etagVal) }catch{}
     try{ res.setHeader('Content-Length', String(m.buffer?.length || 0)) }catch{}
     return res.end(m.buffer)
   }catch(err){
@@ -537,7 +507,6 @@ router.get('/media', auth, async (req, res) => {
     }catch{}
     return res.status(504).json({ error: 'media-timeout' })
   }finally{
-    try{ conc.n = Math.max(0, (conc.n||0) - 1) }catch{}
     inflight.delete(key)
   }
 });

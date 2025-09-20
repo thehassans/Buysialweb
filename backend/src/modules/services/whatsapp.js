@@ -20,6 +20,28 @@ let saveCreds = null;
 let qrString = null;
 let connectedNumber = null;
 
+// Single-flight guard and reconnect backoff to avoid tight reconnect loops
+let connectPromise = null;
+let reconnectBackoffMs = 1000; // start with 1s, exponential up to 30s
+let reconnectTimer = null;
+let cachedVersion = null; // cache Baileys version for the process lifetime
+
+function scheduleReconnect(){
+  try{
+    if (reconnectTimer) return;
+    const delay = Math.min(Math.max(500, reconnectBackoffMs), 30000);
+    console.warn(`[wa] Scheduling reconnect in ${delay}ms`);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      ensureSock().catch(e => {
+        try{ console.error('[wa] Reconnect attempt failed:', e?.message || e) }catch{}
+      });
+    }, delay);
+    // Exponential backoff for subsequent attempts
+    reconnectBackoffMs = Math.min(delay * 2, 30000);
+  }catch{}
+}
+
 // In-flight voice jobs keyed by a client-provided token
 // token -> { canceled: boolean, proc: ChildProcess|null }
 const voiceJobs = new Map();
@@ -33,27 +55,53 @@ const pendingStatus = new Map(); // id -> { jid, status }
 const AUTH_DIR = path.resolve(process.env.WA_AUTH_DIR || path.join(process.cwd(), '.wa-auth'));
 if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true });
 
+// Default timeout for WhatsApp media downloads (to prevent long-hanging streams)
+const DEFAULT_MEDIA_TIMEOUT_MS = Number(process.env.WA_MEDIA_TIMEOUT_MS || 10000);
+
+async function readStreamWithTimeout(asyncIterable, timeoutMs) {
+  const chunks = [];
+  const start = Date.now();
+  try {
+    for await (const c of asyncIterable) {
+      chunks.push(c);
+      if (Date.now() - start > Math.max(1000, Number(timeoutMs) || DEFAULT_MEDIA_TIMEOUT_MS)) {
+        // Attempt to cancel/close the iterator to free resources
+        try { if (typeof asyncIterable.return === 'function') await asyncIterable.return(); } catch {}
+        throw new Error('media-timeout');
+      }
+    }
+  } catch (e) {
+    if (String(e?.message || '') === 'media-timeout') throw e;
+    throw e;
+  }
+  return Buffer.concat(chunks);
+}
+
 async function ensureSock() {
   if (sock) return sock;
-  console.log('[wa] Initializing new socket connection...');
+  if (connectPromise) return connectPromise;
+  connectPromise = (async () => {
+    console.log('[wa] Initializing new socket connection...');
 
-  const { state, saveCreds: _saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-  saveCreds = _saveCreds;
+    const { state, saveCreds: _saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+    saveCreds = _saveCreds;
 
-  const { version } = await fetchLatestBaileysVersion();
+    const verRes = cachedVersion ? { version: cachedVersion } : await fetchLatestBaileysVersion();
+    const { version } = verRes;
+    cachedVersion = version;
 
-  sock = makeWASocket({
-    version,
-    printQRInTerminal: false,
-    auth: state,
-    browser: ['BuySial', 'Chrome', '1.0.0'],
-    logger: Pino({ level: 'silent' })
-  });
+    sock = makeWASocket({
+      version,
+      printQRInTerminal: false,
+      auth: state,
+      browser: ['BuySial', 'Chrome', '1.0.0'],
+      logger: Pino({ level: 'silent' })
+    });
 
-  // Lightweight in-memory chat/message store
-  // Maintain chats and messages maps
-  chats.clear();
-  messages.clear();
+    // Lightweight in-memory chat/message store
+    // Maintain chats and messages maps
+    chats.clear();
+    messages.clear();
 
   sock.ev.on('creds.update', saveCreds);
   sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
@@ -73,13 +121,15 @@ async function ensureSock() {
     if (connection === 'open') {
       connectedNumber = sock?.user?.id || null;
       io.emit('status', { connected: true, number: connectedNumber });
+      // Reset reconnect backoff on successful open and cancel any pending timer
+      try{ reconnectBackoffMs = 1000; if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } }catch{}
     } else if (connection === 'close') {
       const shouldReconnect = (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut);
       io.emit('status', { connected: false });
       sock = null;
       if (shouldReconnect) {
-        console.log('[wa] Reconnecting...');
-        ensureSock().catch(e => console.error('[wa] Reconnect failed:', e));
+        console.log('[wa] Connection closed; will attempt reconnect with backoff');
+        scheduleReconnect();
       }
     }
   });
@@ -292,7 +342,13 @@ async function ensureSock() {
     } catch (err) { try { console.error('[wa] chats.update error', err?.message || err) } catch { } }
   });
 
-  return sock;
+    return sock;
+  })();
+  try {
+    return await connectPromise;
+  } finally {
+    connectPromise = null;
+  }
 }
 
 async function getStatus() {
@@ -348,7 +404,8 @@ function sse(req, res) {
 }
 
 async function listChats() {
-  await ensureSock();
+  // Do not auto-connect here; use existing in-memory/DB data to avoid
+  // triggering reconnection loops due to frequent polling.
   // Seed chat list from in-memory map
   const list = new Map(Array.from(chats.entries())); // jid -> chat
 
@@ -396,7 +453,7 @@ async function listChats() {
 }
 
 async function getMessages(jid, limit = 25, beforeId = null) {
-  await ensureSock();
+  // Do not auto-connect for reads; serve from memory/DB only.
   const arr = messages.get(jid) || [];
   // Start with memory window
   let memEnd = arr.length;
@@ -849,7 +906,10 @@ function cancelVoice(token) {
 }
 
 async function getMedia(jid, id) {
-  await ensureSock();
+  // Avoid auto-connecting for media fetches to prevent reconnect storms under load
+  if (!(sock && sock.user)) {
+    return null;
+  }
   // Try memory first
   let m = (messages.get(jid) || []).find(x => x?.key?.id === id);
   // Fallback to DB
@@ -867,9 +927,8 @@ async function getMedia(jid, id) {
   if (!node) return null;
 
   const stream = await downloadContentFromMessage(node, type);
-  const chunks = [];
-  for await (const c of stream) chunks.push(c);
-  const buffer = Buffer.concat(chunks);
+  const timeoutMs = Number(process.env.WA_MEDIA_TIMEOUT_MS || DEFAULT_MEDIA_TIMEOUT_MS);
+  const buffer = await readStreamWithTimeout(stream, timeoutMs);
   const mimeType = node.mimetype || (fileName ? mime.lookup(fileName) : 'application/octet-stream') || 'application/octet-stream';
   return { buffer, mimeType, fileName };
 }
