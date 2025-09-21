@@ -15,6 +15,34 @@ const TEMP_DIR = path.join(os.tmpdir(), 'buysial-wa');
 try { fs.mkdirSync(TEMP_DIR, { recursive: true }); } catch {}
 const upload = multer({ dest: TEMP_DIR });
 
+// Stricter rate limit for media fetches (heavier upstream load)
+const MEDIA_WINDOW = Math.max(2000, Number(process.env.WA_MEDIA_WINDOW_MS || 10000));
+const MEDIA_MAX = Math.max(2, Number(process.env.WA_MEDIA_MAX || 5));
+
+// Lightweight media metadata (no download). Helps diagnose 504 vs 404 vs no-media.
+router.get('/media/meta', auth, rateLimit({ windowMs: MEDIA_WINDOW, max: MEDIA_MAX }), async (req, res) => {
+  try{
+    const waService = await getWaService();
+    const { jid, id } = req.query || {};
+    if (!jid || !id) return res.status(400).json({ error: 'jid and id required' });
+    if (req.user?.role === 'agent') {
+      const meta = await ChatMeta.findOne({ jid, assignedTo: req.user.id });
+      if (!meta) return res.status(403).json({ error: 'Not allowed for this chat' });
+    }
+    const info = await waService.getMediaMeta(jid, id)
+    // info.hasMedia false -> 404; true -> 200 with type/mime/size
+    if (!info || info.hasMedia === false){
+      try{ res.setHeader('Cache-Control', 'public, max-age=30') }catch{}
+      return res.status(404).json({ hasMedia: false })
+    }
+    return res.json({ ...info })
+  }catch(err){
+    const msg = String(err?.message || 'failed')
+    try{ console.error('[wa media/meta] error', msg) }catch{}
+    return res.status(500).json({ error: 'failed' })
+  }
+})
+
 // Global, conservative rate limit for WA API to avoid hammering
 const GLOBAL_WINDOW = Math.max(500, Number(process.env.WA_RATE_WINDOW_MS || 2000));
 const GLOBAL_MAX = Math.max(5, Number(process.env.WA_RATE_MAX || 20));
@@ -403,9 +431,6 @@ router.post('/cancel-voice', auth, async (req, res) => {
 });
 
 // Download media for a specific message
-// Stricter rate limit for media fetches (heavier upstream load)
-const MEDIA_WINDOW = Math.max(2000, Number(process.env.WA_MEDIA_WINDOW_MS || 10000));
-const MEDIA_MAX = Math.max(2, Number(process.env.WA_MEDIA_MAX || 5));
 router.get('/media', auth, rateLimit({ windowMs: MEDIA_WINDOW, max: MEDIA_MAX }), async (req, res) => {
   const waService = await getWaService();
   const { jid, id } = req.query || {};

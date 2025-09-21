@@ -56,7 +56,7 @@ const AUTH_DIR = path.resolve(process.env.WA_AUTH_DIR || path.join(process.cwd()
 if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true });
 
 // Default timeout for WhatsApp media downloads (to prevent long-hanging streams)
-const DEFAULT_MEDIA_TIMEOUT_MS = Number(process.env.WA_MEDIA_TIMEOUT_MS || 10000);
+const DEFAULT_MEDIA_TIMEOUT_MS = Number(process.env.WA_MEDIA_TIMEOUT_MS || 20000);
 
 async function readStreamWithTimeout(asyncIterable, timeoutMs) {
   const chunks = [];
@@ -933,6 +933,29 @@ async function getMedia(jid, id) {
   return { buffer, mimeType, fileName };
 }
 
+// Return lightweight media metadata without downloading content
+// { hasMedia: boolean, type?: 'image'|'video'|'audio'|'document', fileName?: string|null, mimeType?: string|null, fileLength?: number|undefined }
+async function getMediaMeta(jid, id) {
+  // Do not auto-connect; this endpoint should work from memory/DB to avoid reconnect storms
+  // Try memory first
+  let m = (messages.get(jid) || []).find(x => x?.key?.id === id);
+  // Fallback to DB
+  if (!m){
+    try{ const doc = await WaMessage.findOne({ jid, 'key.id': id }).lean(); if (doc) m = { key: { id: doc.key?.id, fromMe: doc.key?.fromMe }, message: doc.message, messageTimestamp: doc.messageTimestamp, fromMe: !!doc.fromMe, status: doc.status } }catch{}
+  }
+  if (!m) return { hasMedia: false };
+  const msg = m.message || {};
+  let node = null, type = null, fileName = null, mimeType = null, fileLength = undefined;
+  if (msg.imageMessage) { node = msg.imageMessage; type = 'image'; }
+  else if (msg.videoMessage) { node = msg.videoMessage; type = 'video'; }
+  else if (msg.audioMessage) { node = msg.audioMessage; type = 'audio'; }
+  else if (msg.documentMessage) { node = msg.documentMessage; type = 'document'; fileName = msg.documentMessage.fileName || null; }
+  if (!node) return { hasMedia: false };
+  try{ mimeType = node.mimetype || (fileName ? (mime.lookup(fileName) || null) : null) || null }catch{}
+  try{ if (typeof node.fileLength === 'number') fileLength = Number(node.fileLength) }catch{}
+  return { hasMedia: true, type, fileName, mimeType, fileLength };
+}
+
 function normalizeJid(input) {
   if (!input) return null;
   const s = String(input).trim();
@@ -978,6 +1001,7 @@ export default {
   sendVoice,
   cancelVoice,
   getMedia,
+  getMediaMeta,
   normalizeJid,
   getConnectedNumber,
   markRead,
