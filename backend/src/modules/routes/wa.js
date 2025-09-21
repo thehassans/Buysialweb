@@ -8,6 +8,7 @@ import ChatMeta from '../models/ChatMeta.js';
 import Setting from '../models/Setting.js';
 import User from '../models/User.js';
 import rateLimit from '../middleware/rateLimit.js';
+import WaSession from '../models/WaSession.js';
 
 const router = Router();
 // Ensure upload temp directory exists to avoid ENOENT on some hosts
@@ -125,6 +126,23 @@ router.post('/logout', auth, async (_req, res) => {
   await waService.logout();
   res.json({ message: 'WhatsApp session cleared' });
 });
+
+// List session history (recently connected WhatsApp numbers)
+router.get('/sessions', auth, allowRoles('admin','user','manager'), async (req, res) => {
+  try{
+    const limit = Math.max(1, Math.min(100, Number(req.query?.limit || 20)))
+    const docs = await WaSession.find({}).sort({ connectedAt: -1, createdAt: -1 }).limit(limit).lean()
+    const sessions = (docs||[]).map(d => ({
+      id: String(d._id),
+      number: d.number || null,
+      phone: d.phone || null,
+      connectedAt: d.connectedAt || d.createdAt || null,
+      disconnectedAt: d.disconnectedAt || null,
+      active: !!d.active,
+    }))
+    res.json({ sessions })
+  }catch(err){ res.status(500).json({ error: err?.message || 'failed' }) }
+})
 
 // Mark a chat as read (reset unread counters)
 router.post('/mark-read', auth, async (req, res) => {

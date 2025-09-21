@@ -153,12 +153,29 @@ async function ensureSock() {
     if (connection === 'open') {
       connectedNumber = sock?.user?.id || null;
       io.emit('status', { connected: true, number: connectedNumber });
+      // Record session history (active)
+      try{
+        const WaSessionMod = await import('../models/WaSession.js')
+        const WaSession = WaSessionMod.default || WaSessionMod
+        const phone = String(connectedNumber||'').replace(/[^0-9]/g,'')
+        // Create a new session entry for history
+        await WaSession.create({ number: connectedNumber, phone, connectedAt: new Date(), active: true, disconnectedAt: null })
+      }catch(e){ try{ console.warn('[wa] session log (open) failed', e?.message||e) }catch{} }
       // Reset reconnect backoff on successful open and cancel any pending timer
       try{ reconnectBackoffMs = 1000; if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } }catch{}
     } else if (connection === 'close') {
       const shouldReconnect = (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut);
       io.emit('status', { connected: false });
       sock = null;
+      // If logged out (explicit), mark last active session as closed
+      try{
+        if (!shouldReconnect && connectedNumber){
+          const WaSessionMod = await import('../models/WaSession.js')
+          const WaSession = WaSessionMod.default || WaSessionMod
+          const phone = String(connectedNumber||'').replace(/[^0-9]/g,'')
+          await WaSession.updateMany({ phone, active: true }, { $set: { active: false, disconnectedAt: new Date() } })
+        }
+      }catch(e){ try{ console.warn('[wa] session log (close) failed', e?.message||e) }catch{} }
       if (shouldReconnect) {
         console.log('[wa] Connection closed; will attempt reconnect with backoff');
         scheduleReconnect();
@@ -384,8 +401,16 @@ async function ensureSock() {
 }
 
 async function getStatus() {
-  // Do NOT auto-initialize a WhatsApp socket when only checking status.
-  // This prevents re-connecting right after a user logs out.
+  // Auto-initialize if valid credentials exist on disk and no active socket.
+  // This keeps the session connected across app/page reloads.
+  try{
+    if (!(sock && sock.user)){
+      const credsPath = path.join(AUTH_DIR, 'creds.json')
+      if (fs.existsSync(credsPath)){
+        try{ await ensureSock() }catch{}
+      }
+    }
+  }catch{}
   return { connected: !!(sock && sock.user), number: connectedNumber };
 }
 
@@ -405,8 +430,17 @@ async function getQR() {
 }
 
 async function logout() {
+  const num = connectedNumber
   try { if (sock) await sock.logout(); } catch { }
   try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch { }
+  try{
+    if (num){
+      const WaSessionMod = await import('../models/WaSession.js')
+      const WaSession = WaSessionMod.default || WaSessionMod
+      const phone = String(num||'').replace(/[^0-9]/g,'')
+      await WaSession.updateMany({ phone, active: true }, { $set: { active: false, disconnectedAt: new Date() } })
+    }
+  }catch(e){ try{ console.warn('[wa] session log (logout) failed', e?.message||e) }catch{} }
   sock = null; saveCreds = null; qrString = null; connectedNumber = null;
   return { ok: true };
 }
@@ -970,8 +1004,8 @@ async function getMedia(jid, id) {
     return { buffer, mimeType, fileName };
   }catch(err){
     const msg = String(err?.message || '')
-    // On timeout or transient download failure, try to serve a lightweight thumbnail (if available)
-    if (type === 'image' || type === 'video'){
+    // On timeout or transient download failure, try to serve a lightweight thumbnail for images only
+    if (type === 'image'){
       try{
         const thumb = toBufferMaybe(node?.jpegThumbnail || node?.thumbnail)
         if (thumb && thumb.length){
@@ -979,7 +1013,7 @@ async function getMedia(jid, id) {
         }
       }catch{}
     }
-    // Otherwise rethrow to let caller handle (e.g., 504 or 404)
+    // For video/audio/document, rethrow so caller can decide (route returns 204 or 404)
     throw err
   }
 }

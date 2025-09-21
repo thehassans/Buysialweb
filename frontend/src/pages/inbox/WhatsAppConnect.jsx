@@ -8,6 +8,8 @@ export default function WhatsAppConnect(){
   const [loading,setLoading]=useState(false)
   const [polling,setPolling]=useState(false)
   const [updatedAt, setUpdatedAt] = useState(null)
+  const [sessions, setSessions] = useState([])
+  const [sessionsLoading, setSessionsLoading] = useState(false)
   const socketRef = useRef(null)
   const pollTimerRef = useRef(null)
   const backoffRef = useRef(4000) // fallback poll interval
@@ -17,6 +19,15 @@ export default function WhatsAppConnect(){
     try{ const st = await apiGet('/api/wa/status'); setStatus(st); setUpdatedAt(new Date().toISOString()) }catch(_e){}
   }
 
+  async function loadSessions(){
+    setSessionsLoading(true)
+    try{
+      const r = await apiGet('/api/wa/sessions?limit=10')
+      setSessions(Array.isArray(r.sessions)? r.sessions : [])
+    }catch{ setSessions([]) }
+    finally{ setSessionsLoading(false) }
+  }
+
   async function connect(){
     setLoading(true)
     try{
@@ -24,6 +35,7 @@ export default function WhatsAppConnect(){
       if(res?.qr) setQr(res.qr)
       // start polling for QR and status
       setPolling(true)
+      try{ loadSessions() }catch{}
     }catch(_e){
       alert('Failed to start connection')
     }finally{ setLoading(false) }
@@ -33,6 +45,7 @@ export default function WhatsAppConnect(){
     await apiPost('/api/wa/logout', {})
     setQr(null)
     loadStatus()
+    try{ loadSessions() }catch{}
   }
 
   async function resetSession(){
@@ -45,11 +58,12 @@ export default function WhatsAppConnect(){
       const res = await apiPost('/api/wa/connect', {})
       if(res?.qr) setQr(res.qr)
       setPolling(true)
+      try{ loadSessions() }catch{}
     }catch(_e){ alert('Failed to reset session') }
     finally{ setLoading(false) }
   }
 
-  useEffect(()=>{ loadStatus() },[])
+  useEffect(()=>{ loadStatus(); loadSessions() },[])
 
   // Create a Socket.IO connection for live status/QR to avoid aggressive polling
   useEffect(()=>{
@@ -70,6 +84,7 @@ export default function WhatsAppConnect(){
     socket.on('status', (st)=>{
       try{ setStatus(st); setUpdatedAt(new Date().toISOString()) }catch{}
       if (st?.connected){ setQr(null); setPolling(false) }
+      try{ loadSessions() }catch{}
     })
     socket.on('qr', ({ qr })=>{
       try{ setQr(qr); lastQrAtRef.current = Date.now() }catch{}
@@ -202,6 +217,53 @@ export default function WhatsAppConnect(){
             <button className="btn danger" onClick={logout}>Disconnect</button>
           </div>
         )}
+      </div>
+      {/* Sessions History */}
+      <div className="card" style={{display:'grid', gap:12}}>
+        <div className="card-header">
+          <div className="card-title modern">Connection History</div>
+          <div className="card-subtitle">Previously connected WhatsApp numbers</div>
+        </div>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:8}}>
+          <div className="helper">Shows the last 10 sessions. Active sessions are highlighted.</div>
+          <button className="btn secondary" onClick={loadSessions} disabled={sessionsLoading}>{sessionsLoading ? 'Refreshing…' : 'Refresh'}</button>
+        </div>
+        <div style={{overflow:'auto'}}>
+          <table style={{width:'100%', borderCollapse:'separate', borderSpacing:0}}>
+            <thead>
+              <tr>
+                <th style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Phone</th>
+                <th style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Connected</th>
+                <th style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Disconnected</th>
+                <th style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sessionsLoading ? (
+                <tr><td colSpan={4} style={{padding:12, opacity:0.7}}>Loading…</td></tr>
+              ) : !sessions.length ? (
+                <tr><td colSpan={4} style={{padding:12, opacity:0.7}}>No previous sessions</td></tr>
+              ) : (
+                sessions.map(s => (
+                  <tr key={s.id} style={{borderTop:'1px solid var(--border)'}}>
+                    <td style={{padding:'10px 12px'}}>
+                      <code>+{String(s.phone||'').replace(/^\+?/,'')}</code>
+                    </td>
+                    <td style={{padding:'10px 12px'}}>{s.connectedAt ? new Date(s.connectedAt).toLocaleString() : '-'}</td>
+                    <td style={{padding:'10px 12px'}}>{s.disconnectedAt ? new Date(s.disconnectedAt).toLocaleString() : (s.active ? '-' : '')}</td>
+                    <td style={{padding:'10px 12px'}}>
+                      {s.active ? (
+                        <span className="badge" style={{background:'#0f3f33', border:'1px solid #065f46', color:'#c7f9ec'}}>Active</span>
+                      ) : (
+                        <span className="badge" style={{background:'#2a2a2a', border:'1px solid #3a3a3a', color:'#cfcfcf'}}>Ended</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   )
