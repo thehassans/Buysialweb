@@ -2,8 +2,10 @@ import React, { useEffect, useMemo, useState } from 'react'
 import PhoneInput, { isValidPhoneNumber } from 'react-phone-number-input'
 import { API_BASE, apiGet, apiPost, apiDelete } from '../../api'
 import { io } from 'socket.io-client'
+import { useToast } from '../../ui/Toast.jsx'
 
 export default function Agents(){
+  const toast = useToast()
   const [form,setForm] = useState({ firstName:'', lastName:'', phone:'', email:'', password:'' })
   const [loading,setLoading] = useState(false)
   const [msg,setMsg] = useState('')
@@ -34,8 +36,12 @@ export default function Agents(){
     setLoadingList(true)
     try{
       const data = await apiGet(`/api/users/agents?q=${encodeURIComponent(query)}`)
-      setRows(data.users||[])
-    }catch(_e){}
+      const users = data.users || []
+      // Normalize id for UI usage
+      setRows(users.map(u => ({ ...u, id: u.id || u._id })))
+    }catch(e){
+      try{ toast.error(e?.message || 'Failed to load agents') }catch{}
+    }
     finally{ setLoadingList(false)}
   }
 
@@ -94,11 +100,13 @@ export default function Agents(){
       const payload = { ...form, phone: form.phone }
       const res = await apiPost('/api/users/agents', payload)
       setMsg('Agent created successfully')
+      try{ toast.success('Agent created successfully') }catch{}
       setForm({ firstName:'', lastName:'', phone:'', email:'', password:'' })
       setPhoneError('')
       loadAgents(q)
     }catch(err){
       setMsg(err?.message || 'Failed to create agent')
+      try{ toast.error(err?.message || 'Failed to create agent') }catch{}
     }finally{
       setLoading(false)
     }
@@ -108,8 +116,12 @@ export default function Agents(){
     if(!confirm('Delete this agent?')) return
     try{
       await apiDelete(`/api/users/agents/${id}`)
+      try{ toast.success('Agent deleted') }catch{}
       loadAgents(q)
-    }catch(_e){ alert('Failed to delete') }
+    }catch(e){
+      // api.js will likely already toast errors globally, but ensure a toast here too
+      try{ toast.error(e?.message || 'Failed to delete agent') }catch{}
+    }
   }
 
   function fmtDate(s){ try{ return new Date(s).toLocaleString() }catch{ return ''} }
@@ -215,16 +227,16 @@ export default function Agents(){
                 <tr><td colSpan={8} style={{padding:12, opacity:0.7}}>No agents found</td></tr>
               ) : (
                 rows.map(u=> (
-                  <tr key={u.id} style={{borderTop:'1px solid var(--border)'}}>
+                  <tr key={u.id || u._id} style={{borderTop:'1px solid var(--border)'}}>
                     <td style={{padding:'10px 12px'}}>{u.firstName} {u.lastName}</td>
                     <td style={{padding:'10px 12px'}}>{u.email}</td>
                     <td style={{padding:'10px 12px'}}>{u.phone||'-'}</td>
-                    <td style={{padding:'10px 12px'}}>{metrics.find(m=>m.id===u.id)?.assigned ?? 0}</td>
-                    <td style={{padding:'10px 12px'}}>{metrics.find(m=>m.id===u.id)?.done ?? 0}</td>
-                    <td style={{padding:'10px 12px'}}>{(()=>{ const s = metrics.find(m=>m.id===u.id)?.avgResponseSeconds; if(s==null) return '-'; if(s<60) return `${s}s`; const mins=Math.floor(s/60), sec=s%60; return `${mins}m ${sec}s`; })()}</td>
+                    <td style={{padding:'10px 12px'}}>{metrics.find(m=>m.id===(u.id||u._id))?.assigned ?? 0}</td>
+                    <td style={{padding:'10px 12px'}}>{metrics.find(m=>m.id===(u.id||u._id))?.done ?? 0}</td>
+                    <td style={{padding:'10px 12px'}}>{(()=>{ const s = metrics.find(m=>m.id===(u.id||u._id))?.avgResponseSeconds; if(s==null) return '-'; if(s<60) return `${s}s`; const mins=Math.floor(s/60), sec=s%60; return `${mins}m ${sec}s`; })()}</td>
                     <td style={{padding:'10px 12px'}}>{fmtDate(u.createdAt)}</td>
                     <td style={{padding:'10px 12px', textAlign:'right'}}>
-                      <button className="btn danger" onClick={()=>deleteAgent(u.id)}>Delete</button>
+                      <button className="btn danger" onClick={()=>deleteAgent(u.id || u._id)}>Delete</button>
                     </td>
                   </tr>
                 ))
