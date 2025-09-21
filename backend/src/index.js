@@ -41,6 +41,9 @@ const app = express();
 const server = http.createServer(app);
 initSocket(server);
 
+// Behind Plesk / nginx, trust proxy headers for correct protocol/IP handling
+try{ app.set('trust proxy', 1) }catch{}
+
 const PORT = process.env.PORT || 4000;
 
 // Flexible CORS: allow comma-separated origins from env, wildcard '*', and common local dev hosts
@@ -63,13 +66,7 @@ const corsOptions = {
 }
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '5mb' }));
-// Reduce log overhead in production; control via HTTP_LOG env: 'none'|'false' to disable, else morgan format (e.g. 'tiny','dev')
-try{
-  const HTTP_LOG = String(process.env.HTTP_LOG || (process.env.NODE_ENV === 'production' ? 'tiny' : 'dev')).toLowerCase();
-  if (HTTP_LOG && HTTP_LOG !== 'none' && HTTP_LOG !== 'false'){
-    app.use(morgan(HTTP_LOG));
-  }
-}catch{ /* morgan disabled if misconfigured */ }
+app.use(morgan('dev'));
 
 app.get('/api/health', (_req, res) => {
   const dbState = mongoose.connection?.readyState ?? 0 // 0=disconnected,1=connected,2=connecting,3=disconnecting
@@ -117,7 +114,9 @@ try {
     path.resolve(process.cwd(), '../frontend/dist'),
     path.resolve(process.cwd(), 'frontend/dist'),
     path.resolve(__dirname, '../../frontend/dist'),
-    path.resolve('/app/frontend/dist'),
+    // Plesk typical docroot layout: if app root is /httpdocs/backend, this is redundant with ../frontend/dist
+    // but we include it for clarity/explicitness
+    path.resolve('/httpdocs/frontend/dist'),
   ];
   for (const c of candidates){
     try{
@@ -126,11 +125,6 @@ try {
     }catch{}
   }
   if (serveStatic && CLIENT_DIST && INDEX_HTML){
-    // Long-lived caching for build assets (filenames include content hashes)
-    app.use('/assets', (req, res, next) => {
-      try{ res.setHeader('Cache-Control', 'public, max-age=604800, immutable') }catch{}
-      next()
-    })
     app.use(express.static(CLIENT_DIST));
     console.log('Serving frontend from:', CLIENT_DIST);
   } else if (!serveStatic) {
