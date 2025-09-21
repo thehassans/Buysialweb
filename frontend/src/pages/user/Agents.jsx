@@ -14,7 +14,7 @@ export default function Agents(){
   const [phoneError, setPhoneError] = useState('')
   const [metrics, setMetrics] = useState([])
   const [me, setMe] = useState(null)
-  const [delModal, setDelModal] = useState({ open:false, busy:false, error:'', confirm:'', agent:null })
+  const [delModal, setDelModal] = useState({ open:false, busy:false, agent:null })
   const totals = useMemo(()=>{
     const totalAssigned = metrics.reduce((s,m)=> s + (m?.assigned||0), 0)
     const totalDone = metrics.reduce((s,m)=> s + (m?.done||0), 0)
@@ -109,21 +109,20 @@ export default function Agents(){
     }
   }
 
-  function openDelete(agent){ setDelModal({ open:true, busy:false, error:'', confirm:'', agent }) }
+  function openDelete(agent){ setDelModal({ open:true, busy:false, agent }) }
   function closeDelete(){ setDelModal(m=>({ ...m, open:false })) }
   async function confirmDelete(){
     const agent = delModal.agent
     if (!agent) return
-    const want = (agent.email||'').trim().toLowerCase()
-    const typed = (delModal.confirm||'').trim().toLowerCase()
-    if (!typed || typed !== want){ setDelModal(m=>({ ...m, error:'Please type the agent\'s email to confirm.' })); return }
-    setDelModal(m=>({ ...m, busy:true, error:'' }))
+    setDelModal(m=>({ ...m, busy:true }))
     try{
       await apiDelete(`/api/users/agents/${agent.id}`)
-      setDelModal({ open:false, busy:false, error:'', confirm:'', agent:null })
+      setDelModal({ open:false, busy:false, agent:null })
       loadAgents(q); loadPerformance()
     }catch(e){
-      setDelModal(m=>({ ...m, busy:false, error: e?.message || 'Failed to delete agent' }))
+      // Show a lightweight alert on failure
+      alert(e?.message || 'Failed to delete agent')
+      setDelModal(m=>({ ...m, busy:false }))
     }
   }
 
@@ -262,34 +261,16 @@ export default function Agents(){
             <button
               className="btn danger"
               type="button"
-              disabled={delModal.busy || (delModal.confirm||'').trim().toLowerCase() !== (delModal.agent?.email||'').trim().toLowerCase()}
+              disabled={delModal.busy}
               onClick={confirmDelete}
             >{delModal.busy ? 'Deleting…' : 'Delete Agent'}</button>
           </>
         }
       >
-        <div style={{display:'grid', gap:12}}>
-          <div style={{lineHeight:1.5}}>
-            You are about to delete the agent
-            {delModal.agent ? <strong> {delModal.agent.firstName} {delModal.agent.lastName}</strong> : null}.
-            This will:
-            <ul style={{margin:'8px 0 0 18px'}}>
-              <li>Remove their account and login credentials immediately.</li>
-              <li>Revoke access tokens (deleted users cannot authenticate).</li>
-              <li>Clean up WhatsApp chat assignments related to this agent.</li>
-            </ul>
-          </div>
-          <div>
-            <div className="label">Type the agent's email to confirm</div>
-            <input
-              className="input"
-              placeholder={delModal.agent?.email || 'agent@example.com'}
-              value={delModal.confirm}
-              onChange={e=> setDelModal(m=>({ ...m, confirm: e.target.value, error:'' }))}
-              disabled={delModal.busy}
-            />
-            {delModal.error && <div className="helper-text error">{delModal.error}</div>}
-          </div>
+        <div style={{lineHeight:1.6}}>
+          Are you sure you want to delete this agent
+          {delModal.agent ? <strong> {delModal.agent.firstName} {delModal.agent.lastName}</strong> : null}?
+          This action will permanently remove their account and revoke access.
         </div>
       </Modal>
     </div>
