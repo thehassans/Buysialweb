@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import PhoneInput, { isValidPhoneNumber } from 'react-phone-number-input'
-import { apiGet, apiPost, apiDelete } from '../../api'
+import { API_BASE, apiGet, apiPost, apiDelete } from '../../api'
+import { io } from 'socket.io-client'
 
 export default function Investors(){
   const [form, setForm] = useState({ firstName:'', lastName:'', email:'', password:'', phone:'', investmentAmount:'', currency:'SAR' })
@@ -61,6 +62,21 @@ export default function Investors(){
   useEffect(()=>{
     const id = setTimeout(()=> loadManagers(q), 300)
     return ()=> clearTimeout(id)
+  },[q])
+
+  // Real-time: refresh investors list when a new investor is created in this workspace
+  useEffect(()=>{
+    let socket
+    try{
+      const token = localStorage.getItem('token') || ''
+      socket = io(API_BASE || undefined, { path: '/socket.io', transports: ['websocket','polling'], auth: { token } })
+      const refresh = ()=>{ loadManagers(q) }
+      socket.on('investor.created', refresh)
+    }catch{}
+    return ()=>{
+      try{ socket && socket.off('investor.created') }catch{}
+      try{ socket && socket.disconnect() }catch{}
+    }
   },[q])
 
   async function onSubmit(e){

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { apiGet, apiPost } from '../../api'
+import { API_BASE, apiGet, apiPost } from '../../api'
+import { io } from 'socket.io-client'
 
 export default function ManagerDrivers(){
   const [drivers, setDrivers] = useState([])
@@ -36,6 +37,24 @@ export default function ManagerDrivers(){
   useEffect(()=>{ loadDrivers('') },[])
   useEffect(()=>{ const id=setTimeout(()=> loadDrivers(q), 300); return ()=> clearTimeout(id) },[q])
   useEffect(()=>{ loadOrders() },[filters.country, filters.city])
+
+  // Real-time updates: listen for workspace events to refresh orders and drivers
+  useEffect(()=>{
+    let socket
+    try{
+      const token = localStorage.getItem('token') || ''
+      socket = io(API_BASE || undefined, { path: '/socket.io', transports: ['websocket','polling'], auth: { token } })
+      const refreshOrders = ()=>{ loadOrders() }
+      const refreshDrivers = ()=>{ loadDrivers(q) }
+      socket.on('orders.changed', refreshOrders)
+      socket.on('driver.created', refreshDrivers)
+    }catch{}
+    return ()=>{
+      try{ socket && socket.off('orders.changed') }catch{}
+      try{ socket && socket.off('driver.created') }catch{}
+      try{ socket && socket.disconnect() }catch{}
+    }
+  },[q, filters.country, filters.city])
 
   const driversByCity = useMemo(()=>{
     const m = new Map()
