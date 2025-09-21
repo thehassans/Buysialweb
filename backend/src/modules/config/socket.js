@@ -17,19 +17,26 @@ class SocketManager {
       ? { origin: '*', methods: ['GET','POST'] }
       : { origin: raw, methods: ['GET','POST'], credentials: true }
 
+    const pingTimeout = Number(process.env.SOCKET_IO_PING_TIMEOUT || 60000);
+    const pingInterval = Number(process.env.SOCKET_IO_PING_INTERVAL || 25000);
+    const connectTimeout = Number(process.env.SOCKET_IO_CONNECT_TIMEOUT || 20000);
+    const maxHttpBufferSize = Number(process.env.SOCKET_IO_MAX_BUFFER || 1e6);
+    const upgradeTimeout = Number(process.env.SOCKET_IO_UPGRADE_TIMEOUT || 10000);
+    const pathOpt = String(process.env.SOCKET_IO_PATH || '/socket.io');
+
     this.io = new Server(server, {
       cors: corsOpts,
-      path: '/socket.io',
+      path: pathOpt,
       transports: ['websocket', 'polling'],
       allowEIO3: true,
-      pingTimeout: 60000, // Increased to 60s for unstable connections
-      pingInterval: 25000, // Increased to 25s for less frequent pings
-      connectTimeout: 20000, // 20s to establish connection
-      maxHttpBufferSize: 1e6, // 1MB buffer for large messages
+      pingTimeout,
+      pingInterval,
+      connectTimeout,
+      maxHttpBufferSize,
       // Force WebSocket transport when possible
       forceNew: false,
       // Upgrade timeout for WebSocket handshake
-      upgradeTimeout: 10000,
+      upgradeTimeout,
     });
 
     // Add connection monitoring

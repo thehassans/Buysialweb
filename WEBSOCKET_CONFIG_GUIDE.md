@@ -2,7 +2,7 @@
 
 ## Environment Variables for Production
 
-Add these environment variables to your deployment platform (Docker or your chosen host):
+Add these environment variables in Plesk (Domains → Node.js → Environment variables):
 
 ```bash
 # Socket.IO Configuration

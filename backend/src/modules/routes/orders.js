@@ -121,7 +121,8 @@ router.post('/', auth, allowRoles('admin','user','agent','manager'), async (req,
           }catch(_e){
             try{ console.warn('[order] sendDocument failed; falling back to link:', _e?.message||_e) }catch{}
             // Fallback to link if document send fails
-            const link = `${process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT||4000}`}/uploads/invoices/${encodeURIComponent(fileName)}`
+            const hostBase = process.env.PUBLIC_BASE_URL || `${(req?.protocol)||'http'}://${(req?.get?req.get('host'):`localhost:${process.env.PORT||4000}`)}`
+            const link = `${hostBase}/uploads/invoices/${encodeURIComponent(fileName)}`
             const msg = `Your invoice ${doc.invoiceNumber || ''} is ready.\nDownload: ${link}`
             await sendText(jid, msg)
           }
@@ -333,6 +334,13 @@ router.post('/:id/deliver', auth, allowRoles('admin','user','agent','driver'), a
   const { collectedAmount, deliveryNotes, note } = req.body || {}
   const ord = await Order.findById(id)
   if (!ord) return res.status(404).json({ message: 'Order not found' })
+  // Permissions: drivers may deliver only their assigned orders; agents only their own created orders
+  if (req.user.role === 'driver' && String(ord.deliveryBoy||'') !== String(req.user.id)){
+    return res.status(403).json({ message: 'Not allowed' })
+  }
+  if (req.user.role === 'agent' && String(ord.createdBy||'') !== String(req.user.id)){
+    return res.status(403).json({ message: 'Not allowed' })
+  }
   if (collectedAmount != null) ord.collectedAmount = Math.max(0, Number(collectedAmount))
   if (deliveryNotes != null || note != null) ord.deliveryNotes = (note != null ? note : deliveryNotes)
   ord.deliveredAt = new Date()
@@ -362,6 +370,13 @@ router.post('/:id/cancel', auth, allowRoles('admin','user','agent','manager','dr
   const { reason } = req.body || {}
   const ord = await Order.findById(id)
   if (!ord) return res.status(404).json({ message: 'Order not found' })
+  // Permissions: drivers may cancel only their assigned orders; agents only their own created orders
+  if (req.user.role === 'driver' && String(ord.deliveryBoy||'') !== String(req.user.id)){
+    return res.status(403).json({ message: 'Not allowed' })
+  }
+  if (req.user.role === 'agent' && String(ord.createdBy||'') !== String(req.user.id)){
+    return res.status(403).json({ message: 'Not allowed' })
+  }
   ord.shipmentStatus = 'cancelled'
   if (reason != null) ord.returnReason = String(reason)
   await ord.save()
