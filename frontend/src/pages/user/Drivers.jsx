@@ -2,10 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react'
 import PhoneInput, { isValidPhoneNumber } from 'react-phone-number-input'
 import { API_BASE, apiGet, apiPost, apiDelete } from '../../api'
 import { io } from 'socket.io-client'
-import { useToast } from '../../ui/Toast.jsx'
+import Modal from '../../components/Modal.jsx'
 
 export default function Drivers(){
-  const toast = useToast()
   // Country/city options mirrored from SubmitOrder
   const COUNTRY_OPTS = [
     { key:'UAE', name:'UAE', code:'+971', flag:'🇦🇪' },
@@ -28,7 +27,7 @@ export default function Drivers(){
   const [rows, setRows] = useState([])
   const [loadingList, setLoadingList] = useState(false)
   const [phoneError, setPhoneError] = useState('')
-  const [deletingId, setDeletingId] = useState(null)
+  const [delModal, setDelModal] = useState({ open:false, busy:false, error:'', confirm:'', driver:null })
 
   const currentCountryKey = useMemo(()=>{
     const byName = COUNTRY_OPTS.find(c=>c.name===form.country)
@@ -70,17 +69,19 @@ export default function Drivers(){
     return ()=> clearTimeout(id)
   },[q])
 
-  // Real-time: refresh drivers list when a new driver is created in this workspace
+  // Real-time: refresh drivers list when a driver is created/deleted in this workspace
   useEffect(()=>{
     let socket
     try{
       const token = localStorage.getItem('token') || ''
-      socket = io(API_BASE || undefined, { path:'/socket.io', transports:['websocket','polling'], auth: { token } })
+      socket = io(API_BASE || undefined, { path:'/socket.io', transports:['polling','websocket'], auth: { token }, withCredentials: true })
       const refresh = ()=>{ loadDrivers(q) }
       socket.on('driver.created', refresh)
+      socket.on('driver.deleted', refresh)
     }catch{}
     return ()=>{
       try{ socket && socket.off('driver.created') }catch{}
+      try{ socket && socket.off('driver.deleted') }catch{}
       try{ socket && socket.disconnect() }catch{}
     }
   },[q])
@@ -106,18 +107,20 @@ export default function Drivers(){
     finally{ setLoading(false) }
   }
 
-  async function deleteDriver(id){
-    if(!confirm('Delete this driver?')) return
-    try{ 
-      setDeletingId(id)
-      await apiDelete(`/api/users/drivers/${id}`)
-      try{ toast.success('Driver deleted') }catch{}
+  function openDelete(driver){ setDelModal({ open:true, busy:false, error:'', confirm:'', driver }) }
+  function closeDelete(){ setDelModal(m=>({ ...m, open:false })) }
+  async function confirmDelete(){
+    const driver = delModal.driver
+    if (!driver) return
+    const want = (driver.email||'').trim().toLowerCase()
+    const typed = (delModal.confirm||'').trim().toLowerCase()
+    if (!typed || typed !== want){ setDelModal(m=>({ ...m, error: 'Please type the driver\'s email to confirm.' })); return }
+    setDelModal(m=>({ ...m, busy:true, error:'' }))
+    try{
+      await apiDelete(`/api/users/drivers/${driver.id}`)
+      setDelModal({ open:false, busy:false, error:'', confirm:'', driver:null })
       loadDrivers(q)
-    }catch(e){ 
-      try{ toast.error(e?.message || 'Failed to delete driver') }catch{}
-    } finally {
-      setDeletingId(null)
-    }
+    }catch(e){ setDelModal(m=>({ ...m, busy:false, error: e?.message || 'Failed to delete driver' })) }
   }
 
   function fmtDate(s){ try{ return new Date(s).toLocaleString() }catch{ return ''} }
@@ -229,9 +232,7 @@ export default function Drivers(){
                     <td style={{padding:'10px 12px'}}>{u.city||'-'}</td>
                     <td style={{padding:'10px 12px'}}>{fmtDate(u.createdAt)}</td>
                     <td style={{padding:'10px 12px', textAlign:'right'}}>
-                      <button className="btn danger" disabled={deletingId === u.id} onClick={()=>deleteDriver(u.id)}>
-                        {deletingId === u.id ? 'Deleting...' : 'Delete'}
-                      </button>
+                      <button className="btn danger" onClick={()=>openDelete(u)}>Delete</button>
                     </td>
                   </tr>
                 ))
@@ -243,6 +244,45 @@ export default function Drivers(){
           Drivers can sign in at <code>/login</code>. They will be redirected to <code>/driver</code>.
         </div>
       </div>
+      <Modal
+        title="Are you sure you want to delete this driver?"
+        open={delModal.open}
+        onClose={closeDelete}
+        footer={
+          <>
+            <button className="btn secondary" type="button" onClick={closeDelete} disabled={delModal.busy}>Cancel</button>
+            <button
+              className="btn danger"
+              type="button"
+              disabled={delModal.busy || (delModal.confirm||'').trim().toLowerCase() !== (delModal.driver?.email||'').trim().toLowerCase()}
+              onClick={confirmDelete}
+            >{delModal.busy ? 'Deleting…' : 'Delete Driver'}</button>
+          </>
+        }
+      >
+        <div style={{display:'grid', gap:12}}>
+          <div style={{lineHeight:1.5}}>
+            You are about to delete the driver
+            {delModal.driver ? <strong> {delModal.driver.firstName} {delModal.driver.lastName}</strong> : null}.
+            This will:
+            <ul style={{margin:'8px 0 0 18px'}}>
+              <li>Remove their account and login credentials immediately.</li>
+              <li>Revoke access tokens (deleted users cannot authenticate).</li>
+            </ul>
+          </div>
+          <div>
+            <div className="label">Type the driver's email to confirm</div>
+            <input
+              className="input"
+              placeholder={delModal.driver?.email || 'driver@example.com'}
+              value={delModal.confirm}
+              onChange={e=> setDelModal(m=>({ ...m, confirm: e.target.value, error:'' }))}
+              disabled={delModal.busy}
+            />
+            {delModal.error && <div className="helper-text error">{delModal.error}</div>}
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

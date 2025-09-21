@@ -264,6 +264,11 @@ router.delete('/managers/:id', auth, allowRoles('admin','user'), async (req, res
     return res.status(403).json({ message: 'Not allowed' })
   }
   await User.deleteOne({ _id: id })
+  try{
+    const io = getIO()
+    const ownerId = String(mgr.createdBy || req.user.id)
+    if (ownerId) io.to(`workspace:${ownerId}`).emit('manager.deleted', { id: String(id) })
+  }catch{}
   res.json({ message: 'Manager deleted' })
 })
 
@@ -340,6 +345,11 @@ router.delete('/investors/:id', auth, allowRoles('admin','user'), async (req, re
     return res.status(403).json({ message: 'Not allowed' })
   }
   await User.deleteOne({ _id: id })
+  try{
+    const io = getIO()
+    const ownerId = String(inv.createdBy || req.user.id)
+    if (ownerId) io.to(`workspace:${ownerId}`).emit('investor.deleted', { id: String(id) })
+  }catch{}
   res.json({ message: 'Investor deleted' })
 })
 
@@ -462,6 +472,11 @@ router.delete('/drivers/:id', auth, allowRoles('admin','user'), async (req, res)
     return res.status(403).json({ message: 'Not allowed' })
   }
   await User.deleteOne({ _id: id })
+  try{
+    const io = getIO()
+    const ownerId = String(driver.createdBy || req.user.id)
+    if (ownerId) io.to(`workspace:${ownerId}`).emit('driver.deleted', { id: String(id) })
+  }catch{}
   res.json({ message: 'Driver deleted' })
 })
 // Investor self metrics (investor)

@@ -2,10 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react'
 import PhoneInput, { isValidPhoneNumber } from 'react-phone-number-input'
 import { API_BASE, apiGet, apiPost, apiDelete } from '../../api'
 import { io } from 'socket.io-client'
-import { useToast } from '../../ui/Toast.jsx'
+import Modal from '../../components/Modal.jsx'
 
 export default function Investors(){
-  const toast = useToast()
   const [form, setForm] = useState({ firstName:'', lastName:'', email:'', password:'', phone:'', investmentAmount:'', currency:'SAR' })
   const [assignments, setAssignments] = useState([{ productId:'', profitPerUnit:'' }])
   const [loading, setLoading] = useState(false)
@@ -15,7 +14,7 @@ export default function Investors(){
   const [loadingList, setLoadingList] = useState(false)
   const [products, setProducts] = useState([])
   const [phoneError, setPhoneError] = useState('')
-  const [deletingId, setDeletingId] = useState(null)
+  const [delModal, setDelModal] = useState({ open:false, busy:false, error:'', confirm:'', investor:null })
 
   const CURRENCIES = [
     { key:'AED', label:'AED (UAE Dirham)' },
@@ -72,12 +71,14 @@ export default function Investors(){
     let socket
     try{
       const token = localStorage.getItem('token') || ''
-      socket = io(API_BASE || undefined, { path: '/socket.io', transports: ['websocket','polling'], auth: { token } })
+      socket = io(API_BASE || undefined, { path: '/socket.io', transports: ['polling','websocket'], auth: { token }, withCredentials: true })
       const refresh = ()=>{ loadManagers(q) }
       socket.on('investor.created', refresh)
+      socket.on('investor.deleted', refresh)
     }catch{}
     return ()=>{
       try{ socket && socket.off('investor.created') }catch{}
+      try{ socket && socket.off('investor.deleted') }catch{}
       try{ socket && socket.disconnect() }catch{}
     }
   },[q])
@@ -111,18 +112,20 @@ export default function Investors(){
     finally{ setLoading(false) }
   }
 
-  async function deleteInvestor(id){
-    if(!confirm('Delete this investor?')) return
-    try{ 
-      setDeletingId(id)
-      await apiDelete(`/api/users/investors/${id}`)
-      try{ toast.success('Investor deleted') }catch{}
+  function openDelete(investor){ setDelModal({ open:true, busy:false, error:'', confirm:'', investor }) }
+  function closeDelete(){ setDelModal(m=>({ ...m, open:false })) }
+  async function confirmDelete(){
+    const investor = delModal.investor
+    if (!investor) return
+    const want = (investor.email||'').trim().toLowerCase()
+    const typed = (delModal.confirm||'').trim().toLowerCase()
+    if (!typed || typed !== want){ setDelModal(m=>({ ...m, error: 'Please type the investor\'s email to confirm.' })); return }
+    setDelModal(m=>({ ...m, busy:true, error:'' }))
+    try{
+      await apiDelete(`/api/users/investors/${investor.id}`)
+      setDelModal({ open:false, busy:false, error:'', confirm:'', investor:null })
       loadManagers(q)
-    }catch(e){ 
-      try{ toast.error(e?.message || 'Failed to delete investor') }catch{}
-    } finally {
-      setDeletingId(null)
-    }
+    }catch(e){ setDelModal(m=>({ ...m, busy:false, error: e?.message || 'Failed to delete investor' })) }
   }
 
   function fmtDate(s){ try{ return new Date(s).toLocaleString() }catch{ return ''} }
@@ -263,9 +266,7 @@ export default function Investors(){
                     </td>
                     <td style={{padding:'10px 12px'}}>{fmtDate(u.createdAt)}</td>
                     <td style={{padding:'10px 12px', textAlign:'right'}}>
-                      <button className="btn danger" disabled={deletingId === u.id} onClick={()=>deleteInvestor(u.id)}>
-                        {deletingId === u.id ? 'Deleting...' : 'Delete'}
-                      </button>
+                      <button className="btn danger" onClick={()=>openDelete(u)}>Delete</button>
                     </td>
                   </tr>
                 ))
@@ -277,6 +278,45 @@ export default function Investors(){
           Investors can sign in at <code>/login</code> using the email and password above. They will be redirected to <code>/investor</code>.
         </div>
       </div>
+      <Modal
+        title="Are you sure you want to delete this investor?"
+        open={delModal.open}
+        onClose={closeDelete}
+        footer={
+          <>
+            <button className="btn secondary" type="button" onClick={closeDelete} disabled={delModal.busy}>Cancel</button>
+            <button
+              className="btn danger"
+              type="button"
+              disabled={delModal.busy || (delModal.confirm||'').trim().toLowerCase() !== (delModal.investor?.email||'').trim().toLowerCase()}
+              onClick={confirmDelete}
+            >{delModal.busy ? 'Deleting…' : 'Delete Investor'}</button>
+          </>
+        }
+      >
+        <div style={{display:'grid', gap:12}}>
+          <div style={{lineHeight:1.5}}>
+            You are about to delete the investor
+            {delModal.investor ? <strong> {delModal.investor.firstName} {delModal.investor.lastName}</strong> : null}.
+            This will:
+            <ul style={{margin:'8px 0 0 18px'}}>
+              <li>Remove their account and login credentials immediately.</li>
+              <li>Revoke access tokens (deleted users cannot authenticate).</li>
+            </ul>
+          </div>
+          <div>
+            <div className="label">Type the investor's email to confirm</div>
+            <input
+              className="input"
+              placeholder={delModal.investor?.email || 'investor@example.com'}
+              value={delModal.confirm}
+              onChange={e=> setDelModal(m=>({ ...m, confirm: e.target.value, error:'' }))}
+              disabled={delModal.busy}
+            />
+            {delModal.error && <div className="helper-text error">{delModal.error}</div>}
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

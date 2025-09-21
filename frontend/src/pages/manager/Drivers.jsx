@@ -43,15 +43,17 @@ export default function ManagerDrivers(){
     let socket
     try{
       const token = localStorage.getItem('token') || ''
-      socket = io(API_BASE || undefined, { path: '/socket.io', transports: ['websocket','polling'], auth: { token } })
+      socket = io(API_BASE || undefined, { path: '/socket.io', transports: ['polling','websocket'], auth: { token }, withCredentials: true })
       const refreshOrders = ()=>{ loadOrders() }
       const refreshDrivers = ()=>{ loadDrivers(q) }
       socket.on('orders.changed', refreshOrders)
       socket.on('driver.created', refreshDrivers)
+      socket.on('driver.deleted', refreshDrivers)
     }catch{}
     return ()=>{
       try{ socket && socket.off('orders.changed') }catch{}
       try{ socket && socket.off('driver.created') }catch{}
+      try{ socket && socket.off('driver.deleted') }catch{}
       try{ socket && socket.disconnect() }catch{}
     }
   },[q, filters.country, filters.city])
