@@ -77,6 +77,38 @@ async function readStreamWithTimeout(asyncIterable, timeoutMs) {
   return Buffer.concat(chunks);
 }
 
+// Small utility: coerce possible thumbnail representations into a Buffer
+function toBufferMaybe(x){
+  try{
+    if (!x) return null
+    if (Buffer.isBuffer(x)) return x
+    if (Array.isArray(x)) return Buffer.from(x)
+    if (typeof x === 'string'){
+      // Prefer base64 decoding; if it isn't base64, fall back to utf8 bytes
+      try{ return Buffer.from(x, 'base64') }catch{}
+      try{ return Buffer.from(x) }catch{}
+    }
+  }catch{}
+  return null
+}
+
+// Global semaphore to limit concurrent media downloads across all requests
+async function withMediaSlot(fn){
+  const bag = (global.__waMediaSlots = global.__waMediaSlots || { active: 0, q: [] })
+  const limit = Math.max(1, Number(process.env.WA_MEDIA_CONCURRENCY || 1))
+  if (bag.active >= limit){
+    await new Promise(res => bag.q.push(res))
+  }
+  bag.active++
+  try{
+    return await fn()
+  }finally{
+    bag.active--
+    const next = bag.q.shift()
+    if (next) try{ next() }catch{}
+  }
+}
+
 async function ensureSock() {
   if (sock) return sock;
   if (connectPromise) return connectPromise;
@@ -926,11 +958,30 @@ async function getMedia(jid, id) {
   else if (msg.documentMessage) { node = msg.documentMessage; type = 'document'; fileName = msg.documentMessage.fileName; }
   if (!node) return null;
 
-  const stream = await downloadContentFromMessage(node, type);
-  const timeoutMs = Number(process.env.WA_MEDIA_TIMEOUT_MS || DEFAULT_MEDIA_TIMEOUT_MS);
-  const buffer = await readStreamWithTimeout(stream, timeoutMs);
-  const mimeType = node.mimetype || (fileName ? mime.lookup(fileName) : 'application/octet-stream') || 'application/octet-stream';
-  return { buffer, mimeType, fileName };
+  // Attempt actual download within a global concurrency guard
+  try{
+    const { buffer } = await withMediaSlot(async () => {
+      const stream = await downloadContentFromMessage(node, type);
+      const timeoutMs = Number(process.env.WA_MEDIA_TIMEOUT_MS || DEFAULT_MEDIA_TIMEOUT_MS);
+      const buf = await readStreamWithTimeout(stream, timeoutMs);
+      return { buffer: buf }
+    })
+    const mimeType = node.mimetype || (fileName ? mime.lookup(fileName) : 'application/octet-stream') || 'application/octet-stream';
+    return { buffer, mimeType, fileName };
+  }catch(err){
+    const msg = String(err?.message || '')
+    // On timeout or transient download failure, try to serve a lightweight thumbnail (if available)
+    if (type === 'image' || type === 'video'){
+      try{
+        const thumb = toBufferMaybe(node?.jpegThumbnail || node?.thumbnail)
+        if (thumb && thumb.length){
+          return { buffer: thumb, mimeType: 'image/jpeg', fileName: fileName || null }
+        }
+      }catch{}
+    }
+    // Otherwise rethrow to let caller handle (e.g., 504 or 404)
+    throw err
+  }
 }
 
 // Return lightweight media metadata without downloading content

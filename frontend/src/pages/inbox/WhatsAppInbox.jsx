@@ -78,12 +78,13 @@ export default function WhatsAppInbox(){
   const endRef = useRef(null)
   const listRef = useRef(null)
   const mediaUrlCacheRef = useRef(new Map()) // key: `${jid}:${id}` -> objectURL
+  const mediaMetaCacheRef = useRef(new Map()) // key: `${jid}:${id}` -> { hasMedia, type, mimeType, fileName, fileLength }
   const waveformCacheRef = useRef(new Map()) // key: media URL -> { peaks, duration }
   // Notifications & sound
   const [notifyGranted, setNotifyGranted] = useState(()=> (typeof Notification!=='undefined' && Notification.permission==='granted'))
   const [soundOn, setSoundOn] = useState(()=>{ try{ const v=localStorage.getItem('wa_sound'); return v? v!=='false' : true }catch{ return true } })
   const chatsLoadAtRef = useRef(0)
-  const messagesLoadRef = useRef({ inFlight: new Map(), lastAt: new Map(), pending: new Map(), timers: new Map(), minInterval: 12000 })
+  const messagesLoadRef = useRef({ inFlight: new Map(), lastAt: new Map(), pending: new Map(), timers: new Map(), minInterval: 8000 })
   const activeJidRef = useRef(null)
   const chatsRefreshTimerRef = useRef(null)
 
@@ -247,7 +248,7 @@ export default function WhatsAppInbox(){
 
   async function loadChats(){
     const now = Date.now()
-    if (now - (chatsLoadAtRef.current || 0) < 8000) return
+    if (now - (chatsLoadAtRef.current || 0) < 4000) return
     chatsLoadAtRef.current = now
     try{ setChats(await apiGet('/api/wa/chats')) }catch(_e){}
   }
@@ -474,17 +475,17 @@ export default function WhatsAppInbox(){
   // Real-time updates with WebSockets (create once)
   useEffect(()=>{
     const socket = io(API_BASE, {
-      transports: ['websocket'],
+      transports: ['websocket','polling'],
       withCredentials: true,
       path: '/socket.io',
       reconnection: true,
       reconnectionAttempts: Infinity,
-      reconnectionDelay: 2000, // Start with 2s delay
-      reconnectionDelayMax: 30000, // Max 30s between attempts
+      reconnectionDelay: 1000, // Start with 1s delay
+      reconnectionDelayMax: 10000, // Max 10s between attempts
       timeout: 20000, // Connection timeout
       forceNew: false,
       // Add randomization to avoid thundering herd
-      randomizationFactor: 0.7,
+      randomizationFactor: 0.5,
     })
 
     socket.on('connect', ()=> {
@@ -1122,24 +1123,47 @@ export default function WhatsAppInbox(){
     }
   }catch{}
   if (mediaUrlCacheRef.current.has(key)) return mediaUrlCacheRef.current.get(key)
+  // Lightweight meta check to avoid heavy downloads when media is absent/expired
+  try{
+    if (!mediaMetaCacheRef.current.has(key)){
+      try{
+        const info = await apiGet(`/api/wa/media/meta?jid=${encodeURIComponent(jid)}&id=${encodeURIComponent(id)}`)
+        mediaMetaCacheRef.current.set(key, info || { hasMedia:false })
+      }catch(err){
+        const st = err?.status
+        if (st === 404){
+          mediaMetaCacheRef.current.set(key, { hasMedia:false })
+          try{ __mediaPerKeyCooldown.set(key, Date.now() + 30000) }catch{}
+          return null
+        }
+        // For 429/5xx, proceed with guarded download path below
+      }
+    }
+    const info = mediaMetaCacheRef.current.get(key)
+    if (info && info.hasMedia === false){
+      try{ __mediaPerKeyCooldown.set(key, Date.now() + 30000) }catch{}
+      return null
+    }
+  }catch{}
   const task = async ()=>{
     let tries = 0
     let delay = 400
     for(;;){
       try{
         const blob = await apiGetBlob(`/api/wa/media?jid=${encodeURIComponent(jid)}&id=${encodeURIComponent(id)}`)
+        // Treat empty 204 bodies as transient failure
+        if (!blob || blob.size === 0){ const e = new Error('empty-blob'); try{ e.status = 204 }catch{}; throw e }
         const url = URL.createObjectURL(blob)
         mediaUrlCacheRef.current.set(key, url)
         return url
       }catch(e){
         const status = e?.status
         const ra = (typeof e?.retryAfterMs === 'number' && e.retryAfterMs > 0) ? e.retryAfterMs : 0
-        if ((status === 429 || status === 503 || status === 504) && tries < 2){
+        if ((status === 429 || status === 503 || status === 504 || status === 204) && tries < 2){
           // Set a global media cooldown so other downloads back off too
-          const jitter = Math.floor(Math.random()*250)
-          const waitMs = ra || delay
-          __mediaCooldownUntil = Date.now() + Math.min(Math.max(1200, waitMs) + jitter, 12000)
-          // Also set per-key cooldown so we don't keep retrying the same media id
+          try{ __mediaCooldownUntil = Date.now() + Math.min(Math.max(1500, delay + (ra || 0)), 8000) }catch{}
+          const jitter = Math.floor(Math.random()*350)
+          const waitMs = Math.max(delay, ra || 0) + jitter
           try{ __mediaPerKeyCooldown.set(key, Date.now() + Math.min(Math.max(2000, waitMs) + jitter, 15000)) }catch{}
           // Lower concurrency aggressively under pressure
           try{ if (__mediaQueue.limit > 1) __mediaQueue.limit = 1 }catch{}

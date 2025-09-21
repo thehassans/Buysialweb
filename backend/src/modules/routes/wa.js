@@ -46,7 +46,15 @@ router.get('/media/meta', auth, rateLimit({ windowMs: MEDIA_WINDOW, max: MEDIA_M
 // Global, conservative rate limit for WA API to avoid hammering
 const GLOBAL_WINDOW = Math.max(500, Number(process.env.WA_RATE_WINDOW_MS || 2000));
 const GLOBAL_MAX = Math.max(5, Number(process.env.WA_RATE_MAX || 20));
-router.use(rateLimit({ windowMs: GLOBAL_WINDOW, max: GLOBAL_MAX }));
+const globalLimiter = rateLimit({ windowMs: GLOBAL_WINDOW, max: GLOBAL_MAX });
+// Skip low-cost endpoints that may be called frequently
+router.use((req, res, next) => {
+  try{
+    const p = req.path || ''
+    if (p === '/mark-read' || p === '/status') return next();
+  }catch{}
+  return globalLimiter(req, res, next)
+});
 
 // Soft-delete (hide) a chat for User/Admin (does not affect agents)
 router.post('/chat-delete', auth, allowRoles('admin', 'user'), async (req, res) => {
@@ -485,7 +493,20 @@ router.get('/media', auth, rateLimit({ windowMs: MEDIA_WINDOW, max: MEDIA_MAX })
         failMap.set(key, rec)
         res.setHeader('Retry-After', String(waitSec))
       }catch{}
-      return res.status(504).json({ error: 'media-timeout' })
+      // Try to return a tiny placeholder for images to avoid broken thumbnails
+      try{
+        const info = await waService.getMediaMeta(jid, id).catch(()=>null)
+        if (info && info.hasMedia && info.type === 'image'){
+          const tinyPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWP4////fwAJ/gPNgYv9YAAAAABJRU5ErkJggg==', 'base64')
+          res.setHeader('Content-Type', 'image/png')
+          res.setHeader('Cache-Control', 'no-store, must-revalidate')
+          res.setHeader('X-Reason', 'media-timeout')
+          return res.end(tinyPng)
+        }
+      }catch{}
+      // For non-image types, send 204 No Content with Retry-After to avoid error status in client
+      try{ res.setHeader('X-Reason', 'media-timeout') }catch{}
+      return res.status(204).end()
     }
   }
   const p = (async ()=>{
@@ -530,7 +551,20 @@ router.get('/media', auth, rateLimit({ windowMs: MEDIA_WINDOW, max: MEDIA_MAX })
       failMap.set(key, rec)
       res.setHeader('Retry-After', String(waitSec))
     }catch{}
-    return res.status(504).json({ error: 'media-timeout' })
+    // Try to return a tiny placeholder for images to avoid broken thumbnails
+    try{
+      const info = await waService.getMediaMeta(jid, id).catch(()=>null)
+      if (info && info.hasMedia && info.type === 'image'){
+        const tinyPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWP4////fwAJ/gPNgYv9YAAAAABJRU5ErkJggg==', 'base64')
+        res.setHeader('Content-Type', 'image/png')
+        res.setHeader('Cache-Control', 'no-store, must-revalidate')
+        res.setHeader('X-Reason', 'media-timeout')
+        return res.end(tinyPng)
+      }
+    }catch{}
+    // For non-image types, send 204 No Content with Retry-After to avoid error status in client
+    try{ res.setHeader('X-Reason', 'media-timeout') }catch{}
+    return res.status(204).end()
   }finally{
     inflight.delete(key)
   }
