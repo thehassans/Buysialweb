@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import PhoneInput, { isValidPhoneNumber } from 'react-phone-number-input'
 import { apiGet, apiPost, apiDelete } from '../../api'
+import { useToast } from '../../ui/Toast.jsx'
 
 export default function Managers(){
+  const toast = useToast()
   const [form, setForm] = useState({ firstName:'', lastName:'', email:'', password:'', phone:'', canCreateAgents:true, canManageProducts:false, canCreateOrders:false })
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState('')
@@ -10,6 +12,7 @@ export default function Managers(){
   const [rows, setRows] = useState([])
   const [loadingList, setLoadingList] = useState(false)
   const [phoneError, setPhoneError] = useState('')
+  const [deletingId, setDeletingId] = useState(null)
 
   function onChange(e){
     const { name, type, value, checked } = e.target
@@ -66,7 +69,16 @@ export default function Managers(){
 
   async function deleteManager(id){
     if(!confirm('Delete this manager?')) return
-    try{ await apiDelete(`/api/users/managers/${id}`); loadManagers(q) }catch(_e){ alert('Failed to delete') }
+    try{
+      setDeletingId(id)
+      await apiDelete(`/api/users/managers/${id}`)
+      try{ toast.success('Manager deleted') }catch{}
+      loadManagers(q)
+    }catch(e){
+      try{ toast.error(e?.message || 'Failed to delete manager') }catch{}
+    }finally{
+      setDeletingId(null)
+    }
   }
 
   function fmtDate(s){ try{ return new Date(s).toLocaleString() }catch{ return ''} }
@@ -177,7 +189,9 @@ export default function Managers(){
                     </td>
                     <td style={{padding:'10px 12px'}}>{fmtDate(u.createdAt)}</td>
                     <td style={{padding:'10px 12px', textAlign:'right'}}>
-                      <button className="btn danger" onClick={()=>deleteManager(u.id || u._id)}>Delete</button>
+                      <button className="btn danger" disabled={deletingId === (u.id || u._id)} onClick={()=>deleteManager(u.id || u._id)}>
+                        {deletingId === (u.id || u._id) ? 'Deleting...' : 'Delete'}
+                      </button>
                     </td>
                   </tr>
                 ))
