@@ -18,6 +18,8 @@ async function emitOrderChange(ord, action = 'updated'){
       const event = (action === 'assigned') ? 'order.assigned' : 'order.updated'
       try{ io.to(room).emit(event, { orderId, action, order: ord }) }catch{}
     }
+    // Notify the order creator directly as well (e.g., agent who submitted the order)
+    try{ io.to(`user:${String(ord.createdBy)}`).emit('orders.changed', { orderId, action }) }catch{}
     // Compute workspace owner for broadcast
     let ownerId = null
     try{
@@ -33,7 +35,7 @@ async function emitOrderChange(ord, action = 'updated'){
 // Create order (admin, user, agent, manager with permission)
 router.post('/', auth, allowRoles('admin','user','agent','manager'), async (req, res) => {
   const { customerPhone, customerLocation, details, phoneCountryCode, orderCountry, city, customerAddress, locationLat, locationLng, productId, quantity,
-    shipmentMethod, courierName, trackingNumber, deliveryBoy, shippingFee, codAmount, collectedAmount } = req.body || {}
+    shipmentMethod, courierName, trackingNumber, deliveryBoy, shippingFee, codAmount, collectedAmount, total, discount } = req.body || {}
   if (!customerPhone || !customerLocation || !details) return res.status(400).json({ message: 'Missing required fields' })
 
   // Managers may be restricted by permission
@@ -64,7 +66,9 @@ router.post('/', auth, allowRoles('admin','user','agent','manager'), async (req,
   }
   const cod = Math.max(0, Number(codAmount||0))
   const collected = Math.max(0, Number(collectedAmount||0))
-  const shipFee = Math.max(0, Number(shippingFee||0))
+  const shipFee = Math.max(0, Number((shippingFee!=null? shippingFee : req.body?.shipping)||0))
+  const ordTotal = (total!=null) ? Number(total) : (req.body?.total!=null ? Number(req.body.total) : undefined)
+  const disc = (discount!=null) ? Number(discount) : (req.body?.discount!=null ? Number(req.body.discount) : undefined)
   const balanceDue = Math.max(0, cod - collected - shipFee)
 
   const doc = new Order({
@@ -89,6 +93,8 @@ router.post('/', auth, allowRoles('admin','user','agent','manager'), async (req,
     codAmount: cod,
     collectedAmount: collected,
     balanceDue,
+    ...(ordTotal!=null ? { total: ordTotal } : {}),
+    ...(disc!=null ? { discount: disc } : {}),
   })
   await doc.save()
   // Broadcast create
@@ -322,12 +328,13 @@ router.post('/:id/shipment/update', auth, allowRoles('admin','user','agent'), as
 })
 
 // Mark as delivered
-router.post('/:id/deliver', auth, allowRoles('admin','user','agent'), async (req, res) => {
+router.post('/:id/deliver', auth, allowRoles('admin','user','agent','driver'), async (req, res) => {
   const { id } = req.params
-  const { collectedAmount } = req.body || {}
+  const { collectedAmount, deliveryNotes, note } = req.body || {}
   const ord = await Order.findById(id)
   if (!ord) return res.status(404).json({ message: 'Order not found' })
   if (collectedAmount != null) ord.collectedAmount = Math.max(0, Number(collectedAmount))
+  if (deliveryNotes != null || note != null) ord.deliveryNotes = (note != null ? note : deliveryNotes)
   ord.deliveredAt = new Date()
   ord.shipmentStatus = 'delivered'
   ord.balanceDue = Math.max(0, (ord.codAmount||0) - (ord.collectedAmount||0) - (ord.shippingFee||0))
@@ -347,6 +354,19 @@ router.post('/:id/return', auth, allowRoles('admin','user','agent'), async (req,
   await ord.save()
   emitOrderChange(ord, 'returned').catch(()=>{})
   res.json({ message: 'Order returned', order: ord })
+})
+
+// Cancel order with reason (admin, user, agent, manager, driver)
+router.post('/:id/cancel', auth, allowRoles('admin','user','agent','manager','driver'), async (req, res) => {
+  const { id } = req.params
+  const { reason } = req.body || {}
+  const ord = await Order.findById(id)
+  if (!ord) return res.status(404).json({ message: 'Order not found' })
+  ord.shipmentStatus = 'cancelled'
+  if (reason != null) ord.returnReason = String(reason)
+  await ord.save()
+  emitOrderChange(ord, 'cancelled').catch(()=>{})
+  res.json({ message: 'Order cancelled', order: ord })
 })
 
 // Settle COD with courier/delivery

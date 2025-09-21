@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { apiGet, apiPost, API_BASE } from '../../api'
+import { io } from 'socket.io-client'
 
 export default function SubmitOrder(){
   const location = useLocation()
@@ -138,6 +139,21 @@ export default function SubmitOrder(){
 
   useEffect(()=>{ load(); loadProducts() },[])
 
+  // Live refresh on workspace order changes
+  useEffect(()=>{
+    let socket
+    try{
+      const token = localStorage.getItem('token') || ''
+      socket = io(API_BASE || undefined, { path:'/socket.io', transports:['websocket','polling'], auth: { token } })
+      const refresh = ()=>{ load() }
+      socket.on('orders.changed', refresh)
+    }catch{}
+    return ()=>{
+      try{ socket && socket.off('orders.changed') }catch{}
+      try{ socket && socket.disconnect() }catch{}
+    }
+  },[])
+
   // Generate a mostly-unique invoice number (server should enforce uniqueness)
   function genInvoice(){
     const d = new Date()
@@ -231,14 +247,20 @@ export default function SubmitOrder(){
   }
   function statusBadge(st){
     const v = String(st||'pending').toLowerCase()
-    const map = { pending: {bg:'#1f2937', bd:'#334155', fg:'#e5e7eb', label:'pending'}, shipped: {bg:'#0f3f33', bd:'#065f46', fg:'#c7f9ec', label:'shipped'}, delivered: {bg:'#102a43', bd:'#1f4a6e', fg:'#bee3f8', label:'delivered'}, returned: {bg:'#3b0d0d', bd:'#7f1d1d', fg:'#fecaca', label:'returned'} }
+    const map = {
+      pending: {bg:'#1f2937', bd:'#334155', fg:'#e5e7eb', label:'pending'},
+      shipped: {bg:'#0f3f33', bd:'#065f46', fg:'#c7f9ec', label:'shipped'},
+      delivered: {bg:'#102a43', bd:'#1f4a6e', fg:'#bee3f8', label:'delivered'},
+      returned: {bg:'#3b0d0d', bd:'#7f1d1d', fg:'#fecaca', label:'returned'},
+      cancelled: {bg:'#3f1d1d', bd:'#7f1d1d', fg:'#fecaca', label:'cancelled'},
+    }
     const c = map[v] || map.pending
     return <span className="badge" style={{background:c.bg, border:`1px solid ${c.bd}`, color:c.fg}}>{c.label}</span>
   }
 
   function derivedStatus(o){
     const ship = String(o?.shipmentStatus||'').toLowerCase()
-    if (['delivered','returned'].includes(ship)) return ship
+    if (['delivered','returned','cancelled'].includes(ship)) return ship
     const st = String(o?.status||'pending').toLowerCase()
     return st
   }
@@ -499,6 +521,7 @@ export default function SubmitOrder(){
             {k:'shipped', label:'Shipped'},
             {k:'delivered', label:'Delivered'},
             {k:'returned', label:'Returned'},
+            {k:'cancelled', label:'Cancelled'},
           ].map(it => (
             <button key={it.k} type="button" onClick={()=> setStatusFilter(it.k)}
               className="btn secondary"

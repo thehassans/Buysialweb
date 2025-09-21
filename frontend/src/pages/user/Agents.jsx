@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import PhoneInput, { isValidPhoneNumber } from 'react-phone-number-input'
-import { apiGet, apiPost, apiDelete } from '../../api'
+import { API_BASE, apiGet, apiPost, apiDelete } from '../../api'
+import { io } from 'socket.io-client'
 
 export default function Agents(){
   const [form,setForm] = useState({ firstName:'', lastName:'', phone:'', email:'', password:'' })
@@ -62,6 +63,21 @@ export default function Agents(){
 
   // re-load performance when agents list updates
   useEffect(()=>{ if(rows?.length>=0) loadPerformance() }, [rows.length])
+
+  // Live refresh: when orders change in workspace, refresh performance metrics
+  useEffect(()=>{
+    let socket
+    try{
+      const token = localStorage.getItem('token') || ''
+      socket = io(API_BASE || undefined, { path: '/socket.io', transports: ['websocket','polling'], auth: { token } })
+      const refresh = ()=>{ loadPerformance() }
+      socket.on('orders.changed', refresh)
+    }catch{}
+    return ()=>{
+      try{ socket && socket.off('orders.changed') }catch{}
+      try{ socket && socket.disconnect() }catch{}
+    }
+  },[])
 
   async function onSubmit(e){
     e.preventDefault()

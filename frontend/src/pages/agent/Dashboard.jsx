@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { apiGet } from '../../api'
+import { API_BASE, apiGet } from '../../api'
+import { io } from 'socket.io-client'
 
 export default function AgentDashboard(){
   const navigate = useNavigate()
@@ -32,6 +33,21 @@ export default function AgentDashboard(){
   }
 
   useEffect(()=>{ load() },[])
+
+  // Live refresh on order changes across the workspace
+  useEffect(()=>{
+    let socket
+    try{
+      const token = localStorage.getItem('token') || ''
+      socket = io(API_BASE || undefined, { path: '/socket.io', transports: ['websocket','polling'], auth: { token } })
+      const refresh = ()=>{ load() }
+      socket.on('orders.changed', refresh)
+    }catch{}
+    return ()=>{
+      try{ socket && socket.off('orders.changed') }catch{}
+      try{ socket && socket.disconnect() }catch{}
+    }
+  },[])
 
   // Derived metrics
   const ordersSubmitted = ordersSubmittedOverride != null ? ordersSubmittedOverride : orders.length
