@@ -2,10 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react'
 import PhoneInput, { isValidPhoneNumber } from 'react-phone-number-input'
 import { API_BASE, apiGet, apiPost, apiDelete } from '../../api'
 import { io } from 'socket.io-client'
-import { useToast } from '../../ui/Toast.jsx'
+import Modal from '../../components/Modal.jsx'
 
 export default function Agents(){
-  const toast = useToast()
   const [form,setForm] = useState({ firstName:'', lastName:'', phone:'', email:'', password:'' })
   const [loading,setLoading] = useState(false)
   const [msg,setMsg] = useState('')
@@ -15,7 +14,7 @@ export default function Agents(){
   const [phoneError, setPhoneError] = useState('')
   const [metrics, setMetrics] = useState([])
   const [me, setMe] = useState(null)
-  const [deletingId, setDeletingId] = useState(null)
+  const [delModal, setDelModal] = useState({ open:false, busy:false, error:'', confirm:'', agent:null })
   const totals = useMemo(()=>{
     const totalAssigned = metrics.reduce((s,m)=> s + (m?.assigned||0), 0)
     const totalDone = metrics.reduce((s,m)=> s + (m?.done||0), 0)
@@ -37,12 +36,8 @@ export default function Agents(){
     setLoadingList(true)
     try{
       const data = await apiGet(`/api/users/agents?q=${encodeURIComponent(query)}`)
-      const users = data.users || []
-      // Normalize id for UI usage
-      setRows(users.map(u => ({ ...u, id: u.id || u._id })))
-    }catch(e){
-      try{ toast.error(e?.message || 'Failed to load agents') }catch{}
-    }
+      setRows(data.users||[])
+    }catch(_e){}
     finally{ setLoadingList(false)}
   }
 
@@ -79,9 +74,12 @@ export default function Agents(){
       socket = io(API_BASE || undefined, { path: '/socket.io', transports: ['websocket','polling'], auth: { token } })
       const refresh = ()=>{ loadPerformance() }
       socket.on('orders.changed', refresh)
+      const onAgentDeleted = ()=>{ try{ loadAgents(q); loadPerformance() }catch{} }
+      socket.on('agent.deleted', onAgentDeleted)
     }catch{}
     return ()=>{
       try{ socket && socket.off('orders.changed') }catch{}
+      try{ socket && socket.off('agent.deleted') }catch{}
       try{ socket && socket.disconnect() }catch{}
     }
   },[])
@@ -101,47 +99,35 @@ export default function Agents(){
       const payload = { ...form, phone: form.phone }
       const res = await apiPost('/api/users/agents', payload)
       setMsg('Agent created successfully')
-      try{ toast.success('Agent created successfully') }catch{}
       setForm({ firstName:'', lastName:'', phone:'', email:'', password:'' })
       setPhoneError('')
       loadAgents(q)
     }catch(err){
       setMsg(err?.message || 'Failed to create agent')
-      try{ toast.error(err?.message || 'Failed to create agent') }catch{}
     }finally{
       setLoading(false)
     }
   }
 
-  async function deleteAgent(id){
-    if(!confirm('Delete this agent?')) return
+  function openDelete(agent){ setDelModal({ open:true, busy:false, error:'', confirm:'', agent }) }
+  function closeDelete(){ setDelModal(m=>({ ...m, open:false })) }
+  async function confirmDelete(){
+    const agent = delModal.agent
+    if (!agent) return
+    const want = (agent.email||'').trim().toLowerCase()
+    const typed = (delModal.confirm||'').trim().toLowerCase()
+    if (!typed || typed !== want){ setDelModal(m=>({ ...m, error:'Please type the agent\'s email to confirm.' })); return }
+    setDelModal(m=>({ ...m, busy:true, error:'' }))
     try{
-      setDeletingId(id)
-      await apiDelete(`/api/users/agents/${id}`)
-      try{ toast.success('Agent deleted') }catch{}
-      loadAgents(q)
+      await apiDelete(`/api/users/agents/${agent.id}`)
+      setDelModal({ open:false, busy:false, error:'', confirm:'', agent:null })
+      loadAgents(q); loadPerformance()
     }catch(e){
-      // api.js will likely already toast errors globally, but ensure a toast here too
-      try{ toast.error(e?.message || 'Failed to delete agent') }catch{}
-    } finally {
-      setDeletingId(null)
+      setDelModal(m=>({ ...m, busy:false, error: e?.message || 'Failed to delete agent' }))
     }
   }
 
   function fmtDate(s){ try{ return new Date(s).toLocaleString() }catch{ return ''} }
-
-  function canDelete(u){
-    try{
-      if (!me) return false
-      const myId = String(me.id || me._id || '')
-      const ownerId = String(me.createdBy || myId)
-      const createdBy = String(u?.createdBy || '')
-      if (me.role === 'admin') return true
-      if (me.role === 'user') return createdBy === myId
-      if (me.role === 'manager') return createdBy === ownerId || createdBy === myId
-      return false
-    }catch{ return false }
-  }
 
   return (
     <div className="section">
@@ -244,20 +230,16 @@ export default function Agents(){
                 <tr><td colSpan={8} style={{padding:12, opacity:0.7}}>No agents found</td></tr>
               ) : (
                 rows.map(u=> (
-                  <tr key={u.id || u._id} style={{borderTop:'1px solid var(--border)'}}>
+                  <tr key={u.id} style={{borderTop:'1px solid var(--border)'}}>
                     <td style={{padding:'10px 12px'}}>{u.firstName} {u.lastName}</td>
                     <td style={{padding:'10px 12px'}}>{u.email}</td>
                     <td style={{padding:'10px 12px'}}>{u.phone||'-'}</td>
-                    <td style={{padding:'10px 12px'}}>{metrics.find(m=>m.id===(u.id||u._id))?.assigned ?? 0}</td>
-                    <td style={{padding:'10px 12px'}}>{metrics.find(m=>m.id===(u.id||u._id))?.done ?? 0}</td>
-                    <td style={{padding:'10px 12px'}}>{(()=>{ const s = metrics.find(m=>m.id===(u.id||u._id))?.avgResponseSeconds; if(s==null) return '-'; if(s<60) return `${s}s`; const mins=Math.floor(s/60), sec=s%60; return `${mins}m ${sec}s`; })()}</td>
+                    <td style={{padding:'10px 12px'}}>{metrics.find(m=>m.id===u.id)?.assigned ?? 0}</td>
+                    <td style={{padding:'10px 12px'}}>{metrics.find(m=>m.id===u.id)?.done ?? 0}</td>
+                    <td style={{padding:'10px 12px'}}>{(()=>{ const s = metrics.find(m=>m.id===u.id)?.avgResponseSeconds; if(s==null) return '-'; if(s<60) return `${s}s`; const mins=Math.floor(s/60), sec=s%60; return `${mins}m ${sec}s`; })()}</td>
                     <td style={{padding:'10px 12px'}}>{fmtDate(u.createdAt)}</td>
                     <td style={{padding:'10px 12px', textAlign:'right'}}>
-                      {canDelete(u) ? (
-                        <button className="btn danger" disabled={deletingId === (u.id||u._id)} onClick={()=>deleteAgent(u.id || u._id)}>
-                          {deletingId === (u.id||u._id) ? 'Deleting...' : 'Delete'}
-                        </button>
-                      ) : null}
+                      <button className="btn danger" onClick={()=>openDelete(u)}>Delete</button>
                     </td>
                   </tr>
                 ))
@@ -269,6 +251,47 @@ export default function Agents(){
           Agents can sign in at <code>/agent</code> using the email and password above.
         </div>
       </div>
+      {/* Delete Agent Modal */}
+      <Modal
+        title="Delete Agent"
+        open={delModal.open}
+        onClose={closeDelete}
+        footer={
+          <>
+            <button className="btn secondary" type="button" onClick={closeDelete} disabled={delModal.busy}>Cancel</button>
+            <button
+              className="btn danger"
+              type="button"
+              disabled={delModal.busy || (delModal.confirm||'').trim().toLowerCase() !== (delModal.agent?.email||'').trim().toLowerCase()}
+              onClick={confirmDelete}
+            >{delModal.busy ? 'Deleting…' : 'Delete Agent'}</button>
+          </>
+        }
+      >
+        <div style={{display:'grid', gap:12}}>
+          <div style={{lineHeight:1.5}}>
+            You are about to delete the agent
+            {delModal.agent ? <strong> {delModal.agent.firstName} {delModal.agent.lastName}</strong> : null}.
+            This will:
+            <ul style={{margin:'8px 0 0 18px'}}>
+              <li>Remove their account and login credentials immediately.</li>
+              <li>Revoke access tokens (deleted users cannot authenticate).</li>
+              <li>Clean up WhatsApp chat assignments related to this agent.</li>
+            </ul>
+          </div>
+          <div>
+            <div className="label">Type the agent's email to confirm</div>
+            <input
+              className="input"
+              placeholder={delModal.agent?.email || 'agent@example.com'}
+              value={delModal.confirm}
+              onChange={e=> setDelModal(m=>({ ...m, confirm: e.target.value, error:'' }))}
+              disabled={delModal.busy}
+            />
+            {delModal.error && <div className="helper-text error">{delModal.error}</div>}
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

@@ -151,12 +151,28 @@ router.delete('/agents/:id', auth, allowRoles('admin','user','manager'), async (
       const mgr = await User.findById(req.user.id).select('createdBy')
       ownerId = String(mgr?.createdBy || req.user.id)
     }
-    const allowed = new Set([ String(ownerId), String(req.user.id) ])
-    if (!allowed.has(String(agent.createdBy))){
-      return res.status(403).json({ message: 'Not allowed to delete agent outside your workspace' })
+    if (String(agent.createdBy) !== String(ownerId)){
+      return res.status(403).json({ message: 'Not allowed' })
     }
   }
+  // Best-effort cleanup of related data (assignments etc.)
+  try{ await ChatAssignment.deleteMany({ assignedTo: id }) }catch{}
+  // Remove the agent user record (credentials removed with it)
   await User.deleteOne({ _id: id })
+  // Notify workspace for live refresh
+  try{
+    const io = getIO()
+    let ownerId = String(agent.createdBy || '')
+    if (!ownerId){
+      if (req.user.role === 'manager'){
+        const mgr = await User.findById(req.user.id).select('createdBy')
+        ownerId = String(mgr?.createdBy || req.user.id)
+      } else {
+        ownerId = String(req.user.id)
+      }
+    }
+    if (ownerId) io.to(`workspace:${ownerId}`).emit('agent.deleted', { id: String(id) })
+  }catch{}
   res.json({ message: 'Agent deleted' })
 })
 
@@ -381,22 +397,6 @@ router.get('/investors/:id/metrics', auth, allowRoles('admin','user'), async (re
     return { productId: pid, productName: a.product?.name || '', unitsSold: units, profit, saleValue }
   })
   res.json({ currency: inv.investorProfile?.currency || 'SAR', investmentAmount: inv.investorProfile?.investmentAmount || 0, unitsSold: totalUnits, totalProfit, totalSaleValue, breakdown })
-})
-
-// Delete general user (admin only). Guard against deleting self or another admin.
-router.delete('/:id', auth, allowRoles('admin'), async (req, res) => {
-  try{
-    const { id } = req.params
-    if (!id) return res.status(400).json({ message: 'User id required' })
-    if (String(req.user.id) === String(id)) return res.status(400).json({ message: 'You cannot delete your own account' })
-    const u = await User.findById(id)
-    if (!u) return res.status(404).json({ message: 'User not found' })
-    if (u.role === 'admin') return res.status(403).json({ message: 'Not allowed to delete an admin' })
-    await User.deleteOne({ _id: id })
-    return res.json({ message: 'User deleted' })
-  }catch(err){
-    return res.status(500).json({ message: err?.message || 'Failed to delete user' })
-  }
 })
 
 // Drivers CRUD
