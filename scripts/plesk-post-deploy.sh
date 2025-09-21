@@ -1,56 +1,41 @@
 #!/usr/bin/env bash
-# Plesk Git post-deploy script (Linux)
-# - Installs backend deps (production)
-# - Builds frontend
-# - Ensures runtime dirs exist
-# - Restarts Node app (Passenger) by touching tmp/restart.txt
+set -Eeuo pipefail
 
-set -euo pipefail
+log(){ echo "[deploy] $(date +"%Y-%m-%d %H:%M:%S") - $*"; }
+err(){ echo "[deploy] ERROR: $*" >&2; }
 
-# Resolve repo root relative to this script (repo/scripts/plesk-post-deploy.sh)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-BACKEND_DIR="$ROOT_DIR/backend"
-FRONTEND_DIR="$ROOT_DIR/frontend"
+# Run from repo root (script is in scripts/)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
 
-echo "[deploy] Repo root: $ROOT_DIR"
+log "Repo root: $REPO_ROOT"
+log "Node: $(node -v 2>/dev/null || echo 'missing') | npm: $(npm -v 2>/dev/null || echo 'missing')"
 
-# Ensure Node and npm exist
-if ! command -v node >/dev/null 2>&1; then
-  echo "[deploy] ERROR: node is not available in PATH" >&2
-  exit 1
-fi
-if ! command -v npm >/dev/null 2>&1; then
-  echo "[deploy] ERROR: npm is not available in PATH" >&2
-  exit 1
-fi
+export NODE_ENV=production
 
-# Backend: install production dependencies only
-if [ -d "$BACKEND_DIR" ]; then
-  echo "[deploy] Installing backend deps (production)..."
-  ( cd "$BACKEND_DIR" && npm ci --omit=dev )
-  echo "[deploy] Ensuring runtime directories..."
-  mkdir -p "$BACKEND_DIR/uploads" || true
-  mkdir -p "$BACKEND_DIR/wa_auth" || true
+# Install backend deps (production only)
+if [ -d "backend" ]; then
+  log "Installing backend dependencies (production)"
+  (cd backend && npm ci --omit=dev)
 else
-  echo "[deploy] WARN: backend directory not found at $BACKEND_DIR"
+  err "backend/ directory not found"
 fi
 
-# Frontend: install and build
-if [ -d "$FRONTEND_DIR" ]; then
-  echo "[deploy] Installing frontend deps..."
-  ( cd "$FRONTEND_DIR" && npm ci )
-  echo "[deploy] Building frontend..."
-  ( cd "$FRONTEND_DIR" && npm run build )
+# Build frontend
+if [ -d "frontend" ]; then
+  log "Installing frontend dependencies"
+  (cd frontend && npm ci)
+  log "Building frontend"
+  (cd frontend && npm run build)
+  # Print absolute dist path to help configure FRONTEND_DIST
+  if [ -d "frontend/dist" ]; then
+    DIST_ABS="$(cd frontend/dist && pwd)"
+    log "Frontend built at: $DIST_ABS"
+    echo "[deploy] TIP: Set FRONTEND_DIST=$DIST_ABS in Plesk env if not already set."
+  fi
 else
-  echo "[deploy] WARN: frontend directory not found at $FRONTEND_DIR"
+  err "frontend/ directory not found"
 fi
 
-# Restart Node app (Passenger)
-if [ -d "$BACKEND_DIR" ]; then
-  echo "[deploy] Restarting Node app via Passenger tmp/restart.txt..."
-  mkdir -p "$BACKEND_DIR/tmp"
-  date +%s > "$BACKEND_DIR/tmp/restart.txt"
-fi
-
-echo "[deploy] Done."
+log "Deployment tasks completed. Trigger a request to your site or click 'Restart App' in Plesk if needed."
