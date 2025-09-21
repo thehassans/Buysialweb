@@ -111,6 +111,8 @@ try {
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = path.dirname(__filename);
   const candidates = [
+    // Explicit override for Plesk: set FRONTEND_DIST to the absolute dist path
+    ...(process.env.FRONTEND_DIST ? [path.resolve(process.env.FRONTEND_DIST)] : []),
     path.resolve(process.cwd(), '../frontend/dist'),
     path.resolve(process.cwd(), 'frontend/dist'),
     path.resolve(__dirname, '../../frontend/dist'),
@@ -130,7 +132,11 @@ try {
   } else if (!serveStatic) {
     console.log('Static serving disabled via SERVE_STATIC=false');
   } else {
-    console.warn('Frontend dist not found, SPA will not be served. Checked:', candidates);
+    try{
+      console.warn('Frontend dist not found, SPA will not be served. Checked candidates:\n' + candidates.map((c,i)=>`  ${i+1}. ${c}`).join('\n'))
+    }catch{
+      console.warn('Frontend dist not found, SPA will not be served.');
+    }
   }
 } catch (e) {
   console.warn('Static serve setup skipped:', e?.message || e);
