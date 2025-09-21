@@ -151,8 +151,9 @@ router.delete('/agents/:id', auth, allowRoles('admin','user','manager'), async (
       const mgr = await User.findById(req.user.id).select('createdBy')
       ownerId = String(mgr?.createdBy || req.user.id)
     }
-    if (String(agent.createdBy) !== String(ownerId)){
-      return res.status(403).json({ message: 'Not allowed' })
+    const allowed = new Set([ String(ownerId), String(req.user.id) ])
+    if (!allowed.has(String(agent.createdBy))){
+      return res.status(403).json({ message: 'Not allowed to delete agent outside your workspace' })
     }
   }
   await User.deleteOne({ _id: id })
