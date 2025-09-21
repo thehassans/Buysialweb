@@ -383,6 +383,22 @@ router.get('/investors/:id/metrics', auth, allowRoles('admin','user'), async (re
   res.json({ currency: inv.investorProfile?.currency || 'SAR', investmentAmount: inv.investorProfile?.investmentAmount || 0, unitsSold: totalUnits, totalProfit, totalSaleValue, breakdown })
 })
 
+// Delete general user (admin only). Guard against deleting self or another admin.
+router.delete('/:id', auth, allowRoles('admin'), async (req, res) => {
+  try{
+    const { id } = req.params
+    if (!id) return res.status(400).json({ message: 'User id required' })
+    if (String(req.user.id) === String(id)) return res.status(400).json({ message: 'You cannot delete your own account' })
+    const u = await User.findById(id)
+    if (!u) return res.status(404).json({ message: 'User not found' })
+    if (u.role === 'admin') return res.status(403).json({ message: 'Not allowed to delete an admin' })
+    await User.deleteOne({ _id: id })
+    return res.json({ message: 'User deleted' })
+  }catch(err){
+    return res.status(500).json({ message: err?.message || 'Failed to delete user' })
+  }
+})
+
 // Drivers CRUD
 // List drivers (admin => all, user => own, manager => owner's drivers)
 router.get('/drivers', auth, allowRoles('admin','user','manager'), async (req, res) => {
