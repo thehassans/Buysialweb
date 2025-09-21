@@ -71,7 +71,7 @@ export default function Agents(){
     let socket
     try{
       const token = localStorage.getItem('token') || ''
-      socket = io(API_BASE || undefined, { path: '/socket.io', transports: ['websocket','polling'], auth: { token } })
+      socket = io(API_BASE || undefined, { path: '/socket.io', transports: ['polling','websocket'], auth: { token }, withCredentials: true })
       const refresh = ()=>{ loadPerformance() }
       socket.on('orders.changed', refresh)
       const onAgentDeleted = ()=>{ try{ loadAgents(q); loadPerformance() }catch{} }

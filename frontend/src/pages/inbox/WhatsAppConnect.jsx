@@ -67,10 +67,13 @@ export default function WhatsAppConnect(){
 
   // Create a Socket.IO connection for live status/QR to avoid aggressive polling
   useEffect(()=>{
-    const socket = io(API_BASE, {
-      transports: ['websocket', 'polling'],
+    const token = localStorage.getItem('token') || ''
+    const socket = io(API_BASE || undefined, {
+      // Prefer long-polling first; upgrade to websocket when supported by proxy
+      transports: ['polling', 'websocket'],
       withCredentials: true,
       path: '/socket.io',
+      auth: { token },
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000, // Start with 1s delay
