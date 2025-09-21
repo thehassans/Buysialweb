@@ -1486,18 +1486,7 @@ export default function WhatsAppInbox(){
           {myRole === 'agent' ? (
             <button className="btn success" onClick={goToSubmitOrder} title="Submit Order" aria-label="Submit Order">Submit Order</button>
           ) : (
-            <div ref={chatMenuRef} style={{position:'relative'}}>
-              <button className="btn secondary" onClick={()=> setShowChatMenu(s=>!s)} title="Chat menu" aria-label="Chat menu">⋮</button>
-              {showChatMenu && (
-                <div className="dropdown-menu" style={{right:0}}>
-                  <button onClick={openNotes}>Notes</button>
-                  {myRole !== 'agent' && (
-                    <button onClick={() => setShowAssignModal(true)}>Submit to Agent</button>
-                  )}
-                  <button onClick={goToSubmitOrder}>Submit Order</button>
-                </div>
-              )}
-            </div>
+            <button className="btn" onClick={openAssign} title="Submit to Agent" aria-label="Submit to Agent">Submit to Agent</button>
           )}
         </div>
       </div>
@@ -1660,16 +1649,7 @@ export default function WhatsAppInbox(){
                 {myRole === 'agent' ? (
                   <button className="btn success" onClick={goToSubmitOrder} title="Submit Order" aria-label="Submit Order">Submit Order</button>
                 ) : (
-                  <div ref={chatMenuRef} style={{position:'relative'}}>
-                    <button className="btn secondary" onClick={()=> setShowChatMenu(s=>!s)} title="Chat menu" aria-label="Chat menu">⋮</button>
-                    {showChatMenu && (
-                      <div className="dropdown-menu" style={{right:0}}>
-                        <button onClick={openNotes}>Notes</button>
-                        {myRole !== 'agent' && (<button onClick={openAssign}>Submit to Agent</button>)}
-                        <button onClick={goToSubmitOrder}>Submit Order</button>
-                      </div>
-                    )}
-                  </div>
+                  <button className="btn" onClick={openAssign} title="Submit to Agent" aria-label="Submit to Agent">Submit to Agent</button>
                 )}
               </div>
             </div>
@@ -1868,7 +1848,7 @@ export default function WhatsAppInbox(){
         <div className="modal-backdrop" style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.35)', display:'grid', placeItems:'center', zIndex:9999}}>
           <div className="card" role="dialog" aria-modal="true" style={{width: 'min(480px, 96vw)', maxHeight:'90vh', overflow:'auto', padding:16, display:'grid', gap:12}}>
             <div style={{display:'flex', alignItems:'center', justifyContent:'space-between'}}>
-              <div style={{fontWeight:800, fontSize:18}}>Assign Chat to Agent</div>
+              <div style={{fontWeight:800, fontSize:18}}>Submit to Agent</div>
               <button className="btn secondary" onClick={()=> setShowAssignModal(false)} aria-label="Close">✕</button>
             </div>
             <div className="helper">Select an agent to handle this conversation. Agents will only see chats assigned to them.</div>
