@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
-import { apiGet } from '../../api'
+import { API_BASE, apiGet } from '../../api'
+import { io } from 'socket.io-client'
 
 export default function DriverDashboard(){
   const [assigned, setAssigned] = useState([])
@@ -20,6 +21,24 @@ export default function DriverDashboard(){
   }
   useEffect(()=>{ loadAssigned() },[])
   useEffect(()=>{ loadAvailable() },[city])
+
+  // Real-time updates: listen for order events targeted to this driver
+  useEffect(()=>{
+    let socket
+    try{
+      const token = localStorage.getItem('token') || ''
+      socket = io(API_BASE || undefined, { path: '/socket.io', transports: ['websocket','polling'], auth: { token } })
+      const onAssigned = (_payload)=>{ try{ loadAssigned(); loadAvailable() }catch{} }
+      const onUpdated = (_payload)=>{ try{ loadAssigned() }catch{} }
+      socket.on('order.assigned', onAssigned)
+      socket.on('order.updated', onUpdated)
+    }catch{}
+    return ()=>{
+      try{ socket && socket.off('order.assigned') }catch{}
+      try{ socket && socket.off('order.updated') }catch{}
+      try{ socket && socket.disconnect() }catch{}
+    }
+  },[])
 
   function fmtDate(s){ try{ return new Date(s).toLocaleString() }catch{ return '' } }
 

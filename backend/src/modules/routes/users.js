@@ -2,6 +2,7 @@ import { Router } from 'express';
 import User from '../models/User.js';
 import Product from '../models/Product.js';
 import { auth, allowRoles } from '../middleware/auth.js';
+import { getIO } from '../config/socket.js';
 // Lazy WhatsApp import to avoid startup crashes when WA is disabled or deps missing
 async function getWA(){
   const enabled = process.env.ENABLE_WA !== 'false'
@@ -218,6 +219,8 @@ router.post('/managers', auth, allowRoles('admin','user'), async (req, res) => {
   const createdBy = req.user?.id
   const manager = new User({ firstName, lastName, email, password, phone, role: 'manager', createdBy, managerPermissions: { canCreateAgents: !!canCreateAgents, canManageProducts: !!canManageProducts, canCreateOrders: !!canCreateOrders } })
   await manager.save()
+  // Broadcast to workspace for real-time coordination
+  try{ const io = getIO(); const ownerId = req.user.id; io.to(`workspace:${ownerId}`).emit('manager.created', { id: String(manager._id) }) }catch{}
   // Try to send WhatsApp welcome message (non-blocking)
   ;(async ()=>{
     try{
@@ -291,6 +294,8 @@ router.post('/investors', auth, allowRoles('admin','user'), async (req, res) => 
     investorProfile: { investmentAmount: Math.max(0, Number(investmentAmount||0)), currency: cur, assignedProducts }
   })
   await investor.save()
+  // Broadcast: owner workspace should refresh investors; investor self can refresh dashboard
+  try{ const io = getIO(); io.to(`workspace:${createdBy}`).emit('investor.created', { id: String(investor._id) }); io.to(`user:${String(investor._id)}`).emit('investor.updated', { id: String(investor._id) }) }catch{}
   // Try to send WhatsApp welcome message (non-blocking)
   ;(async ()=>{
     try{
@@ -412,6 +417,8 @@ router.post('/drivers', auth, allowRoles('admin','user'), async (req, res) => {
   const createdBy = req.user?.id
   const driver = new User({ firstName, lastName, email, password, phone, country, city, role: 'driver', createdBy })
   await driver.save()
+  // Broadcast to workspace so managers/owners can see the new driver immediately
+  try{ const io = getIO(); io.to(`workspace:${createdBy}`).emit('driver.created', { id: String(driver._id) }) }catch{}
   // Try to send WhatsApp welcome message (non-blocking)
   ;(async ()=>{
     try{

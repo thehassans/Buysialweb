@@ -3,8 +3,32 @@ import Order from '../models/Order.js'
 import Product from '../models/Product.js'
 import { auth, allowRoles } from '../middleware/auth.js'
 import User from '../models/User.js'
+import { getIO } from '../config/socket.js'
 
 const router = express.Router()
+
+// Helper: emit targeted order updates
+async function emitOrderChange(ord, action = 'updated'){
+  try{
+    const io = getIO()
+    const orderId = String(ord?._id || '')
+    // Notify assigned driver
+    if (ord?.deliveryBoy){
+      const room = `user:${String(ord.deliveryBoy)}`
+      const event = (action === 'assigned') ? 'order.assigned' : 'order.updated'
+      try{ io.to(room).emit(event, { orderId, action, order: ord }) }catch{}
+    }
+    // Compute workspace owner for broadcast
+    let ownerId = null
+    try{
+      const creator = await User.findById(ord.createdBy).select('role createdBy').lean()
+      ownerId = (creator?.role === 'user') ? String(ord.createdBy) : (creator?.createdBy ? String(creator.createdBy) : String(ord.createdBy))
+    }catch{}
+    if (ownerId){
+      try{ io.to(`workspace:${ownerId}`).emit('orders.changed', { orderId, action }) }catch{}
+    }
+  }catch{ /* ignore socket errors */ }
+}
 
 // Create order (admin, user, agent, manager with permission)
 router.post('/', auth, allowRoles('admin','user','agent','manager'), async (req, res) => {
@@ -67,6 +91,8 @@ router.post('/', auth, allowRoles('admin','user','agent','manager'), async (req,
     balanceDue,
   })
   await doc.save()
+  // Broadcast create
+  emitOrderChange(doc, 'created').catch(()=>{})
   // Generate invoice PDF and optionally notify via WhatsApp
   try{
     const { generateInvoicePDF } = await import('../utils/invoice.js')
@@ -198,6 +224,8 @@ router.post('/:id/assign-driver', auth, allowRoles('admin','user','manager'), as
   if (!ord.shipmentStatus || ord.shipmentStatus === 'pending') ord.shipmentStatus = 'assigned'
   await ord.save()
   await ord.populate('deliveryBoy','firstName lastName email')
+  // Notify driver + workspace
+  emitOrderChange(ord, 'assigned').catch(()=>{})
   res.json({ message: 'Driver assigned', order: ord })
 })
 
@@ -266,6 +294,8 @@ router.post('/:id/ship', auth, allowRoles('admin','user'), async (req, res) => {
       await prod.save()
     }
   }
+  // Broadcast status change
+  emitOrderChange(ord, 'shipped').catch(()=>{})
   res.json({ message: 'Order shipped', order: ord })
 })
 
@@ -287,6 +317,7 @@ router.post('/:id/shipment/update', auth, allowRoles('admin','user','agent'), as
   if (returnReason != null) ord.returnReason = returnReason
   ord.balanceDue = Math.max(0, (ord.codAmount||0) - (ord.collectedAmount||0) - (ord.shippingFee||0))
   await ord.save()
+  emitOrderChange(ord, 'shipment_updated').catch(()=>{})
   res.json({ message: 'Shipment updated', order: ord })
 })
 
@@ -301,6 +332,7 @@ router.post('/:id/deliver', auth, allowRoles('admin','user','agent'), async (req
   ord.shipmentStatus = 'delivered'
   ord.balanceDue = Math.max(0, (ord.codAmount||0) - (ord.collectedAmount||0) - (ord.shippingFee||0))
   await ord.save()
+  emitOrderChange(ord, 'delivered').catch(()=>{})
   res.json({ message: 'Order delivered', order: ord })
 })
 
@@ -313,6 +345,7 @@ router.post('/:id/return', auth, allowRoles('admin','user','agent'), async (req,
   ord.shipmentStatus = 'returned'
   ord.returnReason = reason || ord.returnReason
   await ord.save()
+  emitOrderChange(ord, 'returned').catch(()=>{})
   res.json({ message: 'Order returned', order: ord })
 })
 
@@ -327,6 +360,7 @@ router.post('/:id/settle', auth, allowRoles('admin','user'), async (req, res) =>
   ord.settledAt = new Date()
   ord.settledBy = req.user.id
   await ord.save()
+  emitOrderChange(ord, 'settled').catch(()=>{})
   res.json({ message: 'Order settled', order: ord })
 })
 

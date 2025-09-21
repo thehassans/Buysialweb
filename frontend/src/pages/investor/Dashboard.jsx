@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { apiGet } from '../../api'
+import { API_BASE, apiGet } from '../../api'
+import { io } from 'socket.io-client'
 
 export default function InvestorDashboard(){
   const [isMobile, setIsMobile] = useState(()=> (typeof window!=='undefined' ? window.innerWidth <= 768 : false))
@@ -14,7 +15,7 @@ export default function InvestorDashboard(){
   },[])
 
   useEffect(()=>{
-    (async ()=>{
+    async function load(){
       try{ const { user } = await apiGet('/api/users/me'); setMe(user||null) }catch{ setMe(null) }
       try{
         setLoading(true)
@@ -29,7 +30,24 @@ export default function InvestorDashboard(){
         })
       }catch{ setMetrics({ currency:'SAR', investmentAmount:0, unitsSold:0, totalProfit:0, totalSaleValue:0, breakdown:[] }) }
       finally{ setLoading(false) }
-    })()
+    }
+    load()
+    // Socket live updates
+    let socket
+    try{
+      const token = localStorage.getItem('token') || ''
+      socket = io(API_BASE || undefined, { path: '/socket.io', transports: ['websocket','polling'], auth: { token } })
+      const refresh = ()=>{ load() }
+      // Orders in the workspace changed (ship/deliver/return/settle/created)
+      socket.on('orders.changed', refresh)
+      // Direct investor updates (profile/assignment changed)
+      socket.on('investor.updated', refresh)
+    }catch{}
+    return ()=>{
+      try{ socket && socket.off('orders.changed') }catch{}
+      try{ socket && socket.off('investor.updated') }catch{}
+      try{ socket && socket.disconnect() }catch{}
+    }
   }, [])
 
   return (
