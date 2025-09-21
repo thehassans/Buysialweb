@@ -2,8 +2,10 @@ import React, { useEffect, useMemo, useState } from 'react'
 import PhoneInput, { isValidPhoneNumber } from 'react-phone-number-input'
 import { API_BASE, apiGet, apiPost, apiDelete } from '../../api'
 import { io } from 'socket.io-client'
+import { useToast } from '../../ui/Toast.jsx'
 
 export default function Drivers(){
+  const toast = useToast()
   // Country/city options mirrored from SubmitOrder
   const COUNTRY_OPTS = [
     { key:'UAE', name:'UAE', code:'+971', flag:'🇦🇪' },
@@ -26,6 +28,7 @@ export default function Drivers(){
   const [rows, setRows] = useState([])
   const [loadingList, setLoadingList] = useState(false)
   const [phoneError, setPhoneError] = useState('')
+  const [deletingId, setDeletingId] = useState(null)
 
   const currentCountryKey = useMemo(()=>{
     const byName = COUNTRY_OPTS.find(c=>c.name===form.country)
@@ -105,7 +108,16 @@ export default function Drivers(){
 
   async function deleteDriver(id){
     if(!confirm('Delete this driver?')) return
-    try{ await apiDelete(`/api/users/drivers/${id}`); loadDrivers(q) }catch(_e){ alert('Failed to delete') }
+    try{ 
+      setDeletingId(id)
+      await apiDelete(`/api/users/drivers/${id}`)
+      try{ toast.success('Driver deleted') }catch{}
+      loadDrivers(q)
+    }catch(e){ 
+      try{ toast.error(e?.message || 'Failed to delete driver') }catch{}
+    } finally {
+      setDeletingId(null)
+    }
   }
 
   function fmtDate(s){ try{ return new Date(s).toLocaleString() }catch{ return ''} }
@@ -217,7 +229,9 @@ export default function Drivers(){
                     <td style={{padding:'10px 12px'}}>{u.city||'-'}</td>
                     <td style={{padding:'10px 12px'}}>{fmtDate(u.createdAt)}</td>
                     <td style={{padding:'10px 12px', textAlign:'right'}}>
-                      <button className="btn danger" onClick={()=>deleteDriver(u.id)}>Delete</button>
+                      <button className="btn danger" disabled={deletingId === u.id} onClick={()=>deleteDriver(u.id)}>
+                        {deletingId === u.id ? 'Deleting...' : 'Delete'}
+                      </button>
                     </td>
                   </tr>
                 ))

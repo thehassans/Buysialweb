@@ -15,6 +15,7 @@ export default function Agents(){
   const [phoneError, setPhoneError] = useState('')
   const [metrics, setMetrics] = useState([])
   const [me, setMe] = useState(null)
+  const [deletingId, setDeletingId] = useState(null)
   const totals = useMemo(()=>{
     const totalAssigned = metrics.reduce((s,m)=> s + (m?.assigned||0), 0)
     const totalDone = metrics.reduce((s,m)=> s + (m?.done||0), 0)
@@ -115,16 +116,32 @@ export default function Agents(){
   async function deleteAgent(id){
     if(!confirm('Delete this agent?')) return
     try{
+      setDeletingId(id)
       await apiDelete(`/api/users/agents/${id}`)
       try{ toast.success('Agent deleted') }catch{}
       loadAgents(q)
     }catch(e){
       // api.js will likely already toast errors globally, but ensure a toast here too
       try{ toast.error(e?.message || 'Failed to delete agent') }catch{}
+    } finally {
+      setDeletingId(null)
     }
   }
 
   function fmtDate(s){ try{ return new Date(s).toLocaleString() }catch{ return ''} }
+
+  function canDelete(u){
+    try{
+      if (!me) return false
+      const myId = String(me.id || me._id || '')
+      const ownerId = String(me.createdBy || myId)
+      const createdBy = String(u?.createdBy || '')
+      if (me.role === 'admin') return true
+      if (me.role === 'user') return createdBy === myId
+      if (me.role === 'manager') return createdBy === ownerId || createdBy === myId
+      return false
+    }catch{ return false }
+  }
 
   return (
     <div className="section">
@@ -236,7 +253,11 @@ export default function Agents(){
                     <td style={{padding:'10px 12px'}}>{(()=>{ const s = metrics.find(m=>m.id===(u.id||u._id))?.avgResponseSeconds; if(s==null) return '-'; if(s<60) return `${s}s`; const mins=Math.floor(s/60), sec=s%60; return `${mins}m ${sec}s`; })()}</td>
                     <td style={{padding:'10px 12px'}}>{fmtDate(u.createdAt)}</td>
                     <td style={{padding:'10px 12px', textAlign:'right'}}>
-                      <button className="btn danger" onClick={()=>deleteAgent(u.id || u._id)}>Delete</button>
+                      {canDelete(u) ? (
+                        <button className="btn danger" disabled={deletingId === (u.id||u._id)} onClick={()=>deleteAgent(u.id || u._id)}>
+                          {deletingId === (u.id||u._id) ? 'Deleting...' : 'Delete'}
+                        </button>
+                      ) : null}
                     </td>
                   </tr>
                 ))

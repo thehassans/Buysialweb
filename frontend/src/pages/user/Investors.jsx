@@ -2,8 +2,10 @@ import React, { useEffect, useMemo, useState } from 'react'
 import PhoneInput, { isValidPhoneNumber } from 'react-phone-number-input'
 import { API_BASE, apiGet, apiPost, apiDelete } from '../../api'
 import { io } from 'socket.io-client'
+import { useToast } from '../../ui/Toast.jsx'
 
 export default function Investors(){
+  const toast = useToast()
   const [form, setForm] = useState({ firstName:'', lastName:'', email:'', password:'', phone:'', investmentAmount:'', currency:'SAR' })
   const [assignments, setAssignments] = useState([{ productId:'', profitPerUnit:'' }])
   const [loading, setLoading] = useState(false)
@@ -13,6 +15,7 @@ export default function Investors(){
   const [loadingList, setLoadingList] = useState(false)
   const [products, setProducts] = useState([])
   const [phoneError, setPhoneError] = useState('')
+  const [deletingId, setDeletingId] = useState(null)
 
   const CURRENCIES = [
     { key:'AED', label:'AED (UAE Dirham)' },
@@ -110,7 +113,16 @@ export default function Investors(){
 
   async function deleteInvestor(id){
     if(!confirm('Delete this investor?')) return
-    try{ await apiDelete(`/api/users/investors/${id}`); loadManagers(q) }catch(_e){ alert('Failed to delete') }
+    try{ 
+      setDeletingId(id)
+      await apiDelete(`/api/users/investors/${id}`)
+      try{ toast.success('Investor deleted') }catch{}
+      loadManagers(q)
+    }catch(e){ 
+      try{ toast.error(e?.message || 'Failed to delete investor') }catch{}
+    } finally {
+      setDeletingId(null)
+    }
   }
 
   function fmtDate(s){ try{ return new Date(s).toLocaleString() }catch{ return ''} }
@@ -251,7 +263,9 @@ export default function Investors(){
                     </td>
                     <td style={{padding:'10px 12px'}}>{fmtDate(u.createdAt)}</td>
                     <td style={{padding:'10px 12px', textAlign:'right'}}>
-                      <button className="btn danger" onClick={()=>deleteInvestor(u.id)}>Delete</button>
+                      <button className="btn danger" disabled={deletingId === u.id} onClick={()=>deleteInvestor(u.id)}>
+                        {deletingId === u.id ? 'Deleting...' : 'Delete'}
+                      </button>
                     </td>
                   </tr>
                 ))
