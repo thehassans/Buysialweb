@@ -127,7 +127,20 @@ try {
     }catch{}
   }
   if (serveStatic && CLIENT_DIST && INDEX_HTML){
-    app.use(express.static(CLIENT_DIST));
+    app.use(express.static(CLIENT_DIST, {
+      setHeaders: (res, filePath) => {
+        try{
+          const base = path.basename(filePath)
+          if (base === 'index.html'){
+            // Never cache the HTML shell so clients pick up latest assets after deploy
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
+          } else if (filePath.includes(`${path.sep}assets${path.sep}`)){
+            // Vite assets are content-hashed; safe to cache long term
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+          }
+        }catch{}
+      }
+    }));
     console.log('Serving frontend from:', CLIENT_DIST);
   } else if (!serveStatic) {
     console.log('Static serving disabled via SERVE_STATIC=false');
