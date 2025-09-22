@@ -15,6 +15,7 @@ export default function Agents(){
   const [metrics, setMetrics] = useState([])
   const [me, setMe] = useState(null)
   const [delModal, setDelModal] = useState({ open:false, busy:false, error:'', confirm:'', agent:null })
+  const [resendingId, setResendingId] = useState('')
   const totals = useMemo(()=>{
     const totalAssigned = metrics.reduce((s,m)=> s + (m?.assigned||0), 0)
     const totalDone = metrics.reduce((s,m)=> s + (m?.done||0), 0)
@@ -106,6 +107,22 @@ export default function Agents(){
       setMsg(err?.message || 'Failed to create agent')
     }finally{
       setLoading(false)
+    }
+  }
+
+  async function resendWelcome(u){
+    try{
+      const uid = String(u?.id || u?._id || '')
+      if (!uid) return
+      setMsg('')
+      setResendingId(uid)
+      await apiPost(`/api/users/agents/${uid}/resend-welcome`, {})
+      await loadAgents(q)
+      setMsg('Welcome message re-sent')
+    }catch(err){
+      setMsg(err?.message || 'Failed to resend welcome')
+    }finally{
+      setResendingId('')
     }
   }
 
@@ -255,7 +272,10 @@ export default function Agents(){
                     <td style={{padding:'10px 12px'}}>{m?.done ?? 0}</td>
                     <td style={{padding:'10px 12px'}}>{(()=>{ const s = m?.avgResponseSeconds; if(s==null) return '-'; if(s<60) return `${s}s`; const mins=Math.floor(s/60), sec=s%60; return `${mins}m ${sec}s`; })()}</td>
                     <td style={{padding:'10px 12px'}}>{fmtDate(u.createdAt)}</td>
-                    <td style={{padding:'10px 12px', textAlign:'right'}}>
+                    <td style={{padding:'10px 12px', textAlign:'right', display:'flex', gap:8, justifyContent:'flex-end'}}>
+                      <button className="btn secondary" disabled={!!resendingId && resendingId===uid} onClick={()=>resendWelcome({ ...u, id: uid })}>
+                        {resendingId===uid ? 'Resending…' : 'Resend Welcome'}
+                      </button>
                       <button className="btn danger" onClick={()=>openDelete({ ...u, id: uid })}>Delete</button>
                     </td>
                   </tr>

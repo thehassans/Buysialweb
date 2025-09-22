@@ -99,6 +99,48 @@ router.get('/agents', auth, allowRoles('admin','user','manager'), async (req, re
   res.json({ users })
 })
 
+// Resend welcome WhatsApp message for an agent (admin/user/manager within scope)
+router.post('/agents/:id/resend-welcome', auth, allowRoles('admin','user','manager'), async (req, res) => {
+  try{
+    const { id } = req.params
+    const agent = await User.findOne({ _id: id, role: 'agent' })
+    if (!agent) return res.status(404).json({ message: 'Agent not found' })
+    if (req.user.role !== 'admin'){
+      let ownerId = req.user.id
+      if (req.user.role === 'manager'){
+        const mgr = await User.findById(req.user.id).select('managerPermissions createdBy')
+        if (!mgr?.managerPermissions?.canCreateAgents){
+          return res.status(403).json({ message: 'Manager not allowed' })
+        }
+        ownerId = String(mgr.createdBy || req.user.id)
+      }
+      if (String(agent.createdBy) !== String(ownerId)){
+        return res.status(403).json({ message: 'Not allowed' })
+      }
+    }
+    const digits = String(agent.phone||'').replace(/\D/g,'')
+    if (!digits){
+      try{ await User.updateOne({ _id: agent._id }, { $set: { welcomeSent: false, welcomeError: 'no-phone' } }) }catch{}
+      return res.status(400).json({ ok:false, message: 'no-phone' })
+    }
+    const jid = `${digits}@s.whatsapp.net`
+    const text = `Welcome to the Buysial team, ${agent.firstName} ${agent.lastName}!\n\nTo get started, please watch the guide video to download the application. Your login credentials are provided below:\n\nEmail: ${agent.email}\nPassword: (set by owner)`
+    const wa = await getWA()
+    try{
+      await wa.sendText(jid, text)
+      try{ await User.updateOne({ _id: agent._id }, { $set: { welcomeSent: true, welcomeSentAt: new Date(), welcomeError: '' } }) }catch{}
+      const fresh = await User.findById(agent._id, '-password')
+      return res.json({ ok:true, user: fresh })
+    }catch(e){
+      const msg = e?.message || 'send-failed'
+      try{ await User.updateOne({ _id: agent._id }, { $set: { welcomeSent: false, welcomeError: String(msg).slice(0,300) } }) }catch{}
+      return res.status(500).json({ ok:false, message: msg })
+    }
+  }catch(err){
+    return res.status(500).json({ message: err?.message || 'failed' })
+  }
+})
+
 // Agents performance metrics
 router.get('/agents/performance', auth, allowRoles('admin','user','manager'), async (req, res) => {
   // Scope to caller
