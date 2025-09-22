@@ -86,52 +86,95 @@ export default function UserLogin(){
       </div>
 
       {/* Main content */}
-      <div className="grid place-items-center p-6 md:p-8">
-        <form onSubmit={login} className="card w-[min(420px,96vw)] grid gap-3 rounded-xl border border-[var(--border)] bg-[var(--panel)] shadow-[0_20px_60px_rgba(0,0,0,.18)] p-4 md:p-5">
-          <div style={{display:'grid', placeItems:'center', gap:8}}>
-            {(()=>{
-              const fallback = `${import.meta.env.BASE_URL}BuySial2.png`
-              const src = branding.loginLogo ? `${API_BASE}${branding.loginLogo}` : fallback
-              return <img src={src} alt="BuySial" style={{width:64, height:64, borderRadius:16, objectFit:'contain', background:'#fff'}}/>
-            })()}
-            <div className="page-title gradient heading-brand" style={{ fontSize:28, letterSpacing:'.3px' }}>Welcome</div>
-            <div className="helper text-center">Sign in to access your dashboard</div>
+      <section className="mx-auto w-full max-w-6xl grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 items-center p-6 md:p-8">
+        {/* Left brand/marketing panel (hidden on small screens) */}
+        <div className="hidden md:block">
+          <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel)]">
+            <div className="absolute inset-0 pointer-events-none opacity-80"
+                 style={{background:
+                   'radial-gradient(80% 60% at 50% -10%, rgba(124,58,237,.18), transparent),'+
+                   'radial-gradient(45% 35% at 100% 100%, rgba(14,165,233,.15), transparent),'+
+                   'radial-gradient(45% 35% at 0% 100%, rgba(34,197,94,.14), transparent)'}}/>
+            <div className="relative z-10 p-8 md:p-10 grid gap-4">
+              <div className="inline-flex items-center gap-3">
+                {(()=>{
+                  const fallback = `${import.meta.env.BASE_URL}BuySial2.png`
+                  const src = branding.headerLogo ? `${API_BASE}${branding.headerLogo}` : fallback
+                  return <img src={src} alt="BuySial" className="h-9 w-auto rounded-md bg-white"/>
+                })()}
+                <div className="font-extrabold tracking-wide text-lg">BuySial Commerce</div>
+              </div>
+              <h1 className="text-3xl font-extrabold leading-tight">
+                Welcome back
+              </h1>
+              <p className="text-[var(--muted)]">
+                Manage chats, agents and orders from a unified dashboard. Lightning-fast, secure, and built for teams.
+              </p>
+              <ul className="grid gap-2 mt-2 text-sm">
+                <li className="inline-flex items-center gap-2"><span aria-hidden>⚡</span><span>Real-time WhatsApp inbox</span></li>
+                <li className="inline-flex items-center gap-2"><span aria-hidden>🛡️</span><span>Role-based access (Admin, User, Manager, Agent, Driver)</span></li>
+                <li className="inline-flex items-center gap-2"><span aria-hidden>📈</span><span>Actionable performance insights</span></li>
+              </ul>
+            </div>
           </div>
+        </div>
 
-          <div>
-            <div className="label">Email</div>
-            <input className="input" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@buysial.com" autoComplete="email" required/>
-          </div>
-          <div>
-            <div className="label">Password</div>
-            <PasswordInput value={password} onChange={setPassword} autoComplete="current-password"/>
-          </div>
-          <div className="text-right mt-0.5">
-            <a href="#" onClick={(e)=>{e.preventDefault(); toast.info('Forgot password coming soon') }}>Forgot password?</a>
-          </div>
+        {/* Right: sign-in card */}
+        <div className="flex items-center justify-center">
+          <form onSubmit={login} className="card w-[min(460px,96vw)] grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--panel)] shadow-[0_20px_60px_rgba(0,0,0,.18)] p-5 md:p-6">
+            <div className="grid place-items-center gap-3">
+              {(()=>{
+                const fallback = `${import.meta.env.BASE_URL}BuySial2.png`
+                const src = branding.loginLogo ? `${API_BASE}${branding.loginLogo}` : fallback
+                return <img src={src} alt="BuySial" className="w-14 h-14 rounded-xl object-contain bg-white"/>
+              })()}
+              <div className="page-title gradient heading-brand" style={{ fontSize:26, letterSpacing:'.3px' }}>Sign in</div>
+              <div className="helper text-center">Access your dashboard</div>
+            </div>
 
-          <button className="btn mt-1" disabled={loading}>
-            {loading? 'Signing in…' : 'Login'}
-          </button>
+            <div className="grid gap-2 mt-1">
+              <label className="label" htmlFor="login-email">Email</label>
+              <div className="relative">
+                <input id="login-email" className="input pl-9" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@buysial.com" autoComplete="email" required/>
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 opacity-70" aria-hidden>✉️</span>
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <label className="label" htmlFor="login-password">Password</label>
+              {/* PasswordInput already includes the show/hide button */}
+              <PasswordInput value={password} onChange={setPassword} autoComplete="current-password" id="login-password"/>
+              <div className="text-right -mt-1.5">
+                <a href="#" onClick={(e)=>{e.preventDefault(); toast.info('Forgot password coming soon') }}>Forgot password?</a>
+              </div>
+            </div>
 
-          <div className="grid gap-1.5 mt-2">
-            {(()=>{
-              const dbLabel = String(health.dbLabel||'').toLowerCase()
-              const allGood = health.ok && dbLabel === 'connected'
-              if (allGood) return null
-              const apiLabel = health.ok ? 'ok' : 'down'
-              const statusText = `API: ${apiLabel} · DB: ${health.dbLabel || 'unknown'}`
-              return (
-                <div className="flex justify-center">
-                  <button type="button" className="btn danger" title={statusText} onClick={()=>window.location.reload()}>
-                    Connection issue
-                  </button>
-                </div>
-              )
-            })()}
-          </div>
-        </form>
-      </div>
+            <button className="btn mt-1" disabled={loading}>
+              {loading? 'Signing in…' : 'Continue'}
+            </button>
+
+            <div className="grid gap-1.5 mt-2">
+              {(()=>{
+                const dbLabel = String(health.dbLabel||'').toLowerCase()
+                const allGood = health.ok && dbLabel === 'connected'
+                if (allGood) return null
+                const apiLabel = health.ok ? 'ok' : 'down'
+                const statusText = `API: ${apiLabel} · DB: ${health.dbLabel || 'unknown'}`
+                return (
+                  <div className="flex justify-center">
+                    <button type="button" className="btn danger" title={statusText} onClick={()=>window.location.reload()}>
+                      Connection issue
+                    </button>
+                  </div>
+                )
+              })()}
+            </div>
+
+            <div className="text-center text-xs text-[var(--muted)] mt-2">
+              By continuing, you agree to our Terms and Privacy Policy.
+            </div>
+          </form>
+        </div>
+      </section>
     </div>
   )
 }
