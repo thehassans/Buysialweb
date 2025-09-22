@@ -216,6 +216,7 @@ export default function Agents(){
                 <th style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Name</th>
                 <th style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Email</th>
                 <th style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Phone</th>
+                <th style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Welcome</th>
                 <th style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Assigned</th>
                 <th style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Done</th>
                 <th style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Avg Response</th>
@@ -225,30 +226,50 @@ export default function Agents(){
             </thead>
             <tbody>
               {loadingList ? (
-                <tr><td colSpan={8} style={{padding:12, opacity:0.7}}>Loading...</td></tr>
+                <tr><td colSpan={9} style={{padding:12, opacity:0.7}}>Loading...</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={8} style={{padding:12, opacity:0.7}}>No agents found</td></tr>
+                <tr><td colSpan={9} style={{padding:12, opacity:0.7}}>No agents found</td></tr>
               ) : (
-                rows.map(u=> (
-                  <tr key={u.id} style={{borderTop:'1px solid var(--border)'}}>
+                rows.map(u=> {
+                  const uid = String(u.id || u._id || '')
+                  const m = metrics.find(m=> String(m.id||'') === uid)
+                  return (
+                  <tr key={uid || u.email || `${u.firstName}-${u.lastName}`} style={{borderTop:'1px solid var(--border)'}}>
                     <td style={{padding:'10px 12px'}}>{u.firstName} {u.lastName}</td>
                     <td style={{padding:'10px 12px'}}>{u.email}</td>
                     <td style={{padding:'10px 12px'}}>{u.phone||'-'}</td>
-                    <td style={{padding:'10px 12px'}}>{metrics.find(m=>m.id===u.id)?.assigned ?? 0}</td>
-                    <td style={{padding:'10px 12px'}}>{metrics.find(m=>m.id===u.id)?.done ?? 0}</td>
-                    <td style={{padding:'10px 12px'}}>{(()=>{ const s = metrics.find(m=>m.id===u.id)?.avgResponseSeconds; if(s==null) return '-'; if(s<60) return `${s}s`; const mins=Math.floor(s/60), sec=s%60; return `${mins}m ${sec}s`; })()}</td>
+                    <td style={{padding:'10px 12px'}}>
+                      {(function(){
+                        const ok = !!u.welcomeSent
+                        const err = (u.welcomeError||'').trim()
+                        const label = ok ? 'Welcome message sent' : (err ? `Failed: ${err}` : 'Pending')
+                        return (
+                          <span title={label} aria-label={label} style={{display:'inline-flex', alignItems:'center', gap:6}}>
+                            <span style={{display:'inline-block', width:10, height:10, borderRadius:999, background: ok? '#22c55e' : '#ef4444'}} />
+                            <span style={{opacity:0.9}}>{ok? 'Sent' : (err? 'Failed' : 'Pending')}</span>
+                          </span>
+                        )
+                      })()}
+                    </td>
+                    <td style={{padding:'10px 12px'}}>{m?.assigned ?? 0}</td>
+                    <td style={{padding:'10px 12px'}}>{m?.done ?? 0}</td>
+                    <td style={{padding:'10px 12px'}}>{(()=>{ const s = m?.avgResponseSeconds; if(s==null) return '-'; if(s<60) return `${s}s`; const mins=Math.floor(s/60), sec=s%60; return `${mins}m ${sec}s`; })()}</td>
                     <td style={{padding:'10px 12px'}}>{fmtDate(u.createdAt)}</td>
                     <td style={{padding:'10px 12px', textAlign:'right'}}>
-                      <button className="btn danger" onClick={()=>openDelete(u)}>Delete</button>
+                      <button className="btn danger" onClick={()=>openDelete({ ...u, id: uid })}>Delete</button>
                     </td>
                   </tr>
-                ))
+                  )
+                })
               )}
             </tbody>
           </table>
         </div>
-        <div style={{fontSize:12, opacity:0.8}}>
-          Agents can sign in at <code>/agent</code> using the email and password above.
+        <div style={{fontSize:12, opacity:0.8, display:'grid', gap:4}}>
+          <div>Agents can sign in at <code>/agent</code> using the email and password above.</div>
+          {rows.some(r => (r.welcomeSent===false && String(r.welcomeError||'').includes('wa-not-connected'))) && (
+            <div className="helper-text" style={{color:'var(--muted)'}}>Note: Some welcome messages failed because WhatsApp is not connected. Please connect WhatsApp from Inbox → Connect and try again.</div>
+          )}
         </div>
       </div>
       {/* Delete Agent Modal */}

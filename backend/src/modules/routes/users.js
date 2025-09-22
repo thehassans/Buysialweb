@@ -58,7 +58,16 @@ router.post('/agents', auth, allowRoles('admin','user','manager'), async (req, r
         const jid = `${digits}@s.whatsapp.net`
         const text = `Welcome to the Buysial team, ${firstName} ${lastName}!\n\nTo get started, please watch the guide video to download the application. Your login credentials are provided below:\n\nEmail: ${email}\nPassword: ${password}`
         const wa = await getWA()
-        await wa.sendText(jid, text)
+        try{
+          await wa.sendText(jid, text)
+          try{ await User.updateOne({ _id: agent._id }, { $set: { welcomeSent: true, welcomeSentAt: new Date(), welcomeError: '' } }) }catch{}
+        }catch(e){
+          const msg = e?.message || 'send-failed'
+          try{ await User.updateOne({ _id: agent._id }, { $set: { welcomeSent: false, welcomeError: String(msg).slice(0,300) } }) }catch{}
+          throw e
+        }
+      } else {
+        try{ await User.updateOne({ _id: agent._id }, { $set: { welcomeSent: false, welcomeError: 'no-phone' } }) }catch{}
       }
     }catch(err){
       try { console.error('[agents] failed to send welcome WA', err?.message||err) } catch {}

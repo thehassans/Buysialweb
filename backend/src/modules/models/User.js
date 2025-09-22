@@ -20,6 +20,10 @@ const UserSchema = new mongoose.Schema({
     canManageProducts: { type: Boolean, default: false },
     canCreateOrders: { type: Boolean, default: false },
   },
+  // Auto welcome message status (set on agent creation best-effort)
+  welcomeSent: { type: Boolean, default: false },
+  welcomeSentAt: { type: Date },
+  welcomeError: { type: String, default: '' },
   // Investor specific profile (only applicable when role === 'investor')
   investorProfile: {
     investmentAmount: { type: Number, default: 0 },
