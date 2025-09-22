@@ -82,7 +82,8 @@ export default function WhatsAppInbox(){
   const waveformCacheRef = useRef(new Map()) // key: media URL -> { peaks, duration }
   // Notifications & sound
   const [notifyGranted, setNotifyGranted] = useState(()=> (typeof Notification!=='undefined' && Notification.permission==='granted'))
-  const [soundOn, setSoundOn] = useState(()=>{ try{ const v=localStorage.getItem('wa_sound'); return v? v!=='false' : true }catch{ return true } })
+  const ringCtxRef = useRef(null)
+  const lastRingAtRef = useRef(0)
   const chatsLoadAtRef = useRef(0)
   const messagesLoadRef = useRef({ inFlight: new Map(), lastAt: new Map(), pending: new Map(), timers: new Map(), minInterval: 8000 })
   const activeJidRef = useRef(null)
@@ -1153,23 +1154,103 @@ export default function WhatsAppInbox(){
       return 'New message'
     }catch{ return 'New message' }
   }
-  function playDing(){
+  function getRingCtx(){
     try{
-      const ctx = new (window.AudioContext || window.webkitAudioContext)()
+      if (ringCtxRef.current && typeof ringCtxRef.current.state === 'string') return ringCtxRef.current
+      const Ctx = (window.AudioContext || (window).webkitAudioContext)
+      if (!Ctx) return null
+      ringCtxRef.current = new Ctx()
+      return ringCtxRef.current
+    }catch{ return null }
+  }
+  // Warm up and resume the audio context on first user interaction (allows playback when backgrounded later)
+  useEffect(()=>{
+    try{
+      const ctx = getRingCtx()
+      const resume = ()=>{ try{ ctx && ctx.resume && ctx.resume().catch(()=>{}) }catch{} }
+      window.addEventListener('pointerdown', resume, { once: true })
+      window.addEventListener('keydown', resume, { once: true })
+      return ()=>{ window.removeEventListener('pointerdown', resume); window.removeEventListener('keydown', resume) }
+    }catch{}
+  },[])
+  function playBeep(volume){
+    try{
+      const ctx = getRingCtx(); if (!ctx) return
       const o = ctx.createOscillator(); const g = ctx.createGain()
       o.type = 'sine'; o.frequency.setValueAtTime(880, ctx.currentTime)
       g.gain.setValueAtTime(0.0001, ctx.currentTime)
-      g.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime+0.01)
-      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+0.35)
+      g.gain.exponentialRampToValueAtTime(Math.max(0.05, (typeof volume==='number'? volume:1) * 0.4), ctx.currentTime+0.01)
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+0.45)
       o.connect(g); g.connect(ctx.destination)
-      o.start(); o.stop(ctx.currentTime+0.4)
+      o.start(); o.stop(ctx.currentTime+0.5)
+    }catch{}
+  }
+  function playTonePattern(name, volume){
+    try{
+      const vol = Math.max(0, Math.min(1, typeof volume==='number'? volume : 1))
+      const ctx = getRingCtx(); if (!ctx) return
+      const now = ctx.currentTime
+      function toneAt(t, freq, dur=0.12, type='sine', startGain=0.0001, peakGain=0.26){
+        const o = ctx.createOscillator(); const g = ctx.createGain()
+        o.type = type; o.frequency.setValueAtTime(freq, now + t)
+        g.gain.setValueAtTime(startGain, now + t)
+        g.gain.exponentialRampToValueAtTime(Math.max(0.03, vol*peakGain), now + t + 0.02)
+        g.gain.exponentialRampToValueAtTime(0.0001, now + t + dur)
+        o.connect(g); g.connect(ctx.destination)
+        o.start(now + t); o.stop(now + t + dur + 0.02)
+      }
+      const n = String(name||'').toLowerCase()
+      if (n==='shopify'){
+        // Simple ascending chime: three quick notes
+        toneAt(0.00, 932, 0.12, 'triangle')
+        toneAt(0.10, 1047, 0.12, 'triangle')
+        toneAt(0.20, 1245, 0.16, 'triangle')
+        return
+      }
+      if (n==='bell'){
+        // Single bell-like chime with longer decay
+        toneAt(0.00, 880, 0.60, 'sine', 0.0001, 0.40)
+        toneAt(0.00, 1760, 0.40, 'sine', 0.0001, 0.18)
+        return
+      }
+      if (n==='ping'){
+        // Short high ping
+        toneAt(0.00, 1320, 0.20, 'sine', 0.0001, 0.35)
+        return
+      }
+      if (n==='knock'){
+        // Two low thuds
+        toneAt(0.00, 200, 0.12, 'sine', 0.0001, 0.50)
+        toneAt(0.16, 180, 0.12, 'sine', 0.0001, 0.50)
+        return
+      }
+      // default
+      playBeep(vol)
+    }catch{}
+  }
+  function playRingtone(){
+    try{
+      // Read latest preferences from localStorage each time
+      const v = localStorage.getItem('wa_sound')
+      const enabled = v ? v !== 'false' : true
+      if (!enabled) return
+
+      const now = Date.now()
+      if (now - (lastRingAtRef.current || 0) < 600) return // throttle to avoid spam
+      lastRingAtRef.current = now
+
+      const tone = localStorage.getItem('wa_ringtone') || 'shopify'
+      const volRaw = parseFloat(localStorage.getItem('wa_ringtone_volume')||'1')
+      const vol = Number.isFinite(volRaw) ? Math.max(0, Math.min(1, volRaw)) : 1
+      playTonePattern(tone, vol)
     }catch{}
   }
   function notifyIncoming(jid, rawMessage){
     const content = unwrapMessage(rawMessage?.message)
     const title = getChatNameByJid(jid)
     const body = previewText(content)
-    if (soundOn) playDing()
+    // Play user-selected ringtone (function internally respects enable/disable)
+    playRingtone()
     try{
       if (typeof Notification!=='undefined' && Notification.permission==='granted'){
         const n = new Notification(title || 'New message', { body })

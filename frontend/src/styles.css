@@ -377,10 +377,10 @@ a{color:inherit;text-decoration:none}
   .card.edge-to-edge.wa-chat{ border: none; border-radius: 0; height: 100dvh; margin-left: 0 !important }
 
   /* Fixed bottom mobile tab bar */
-  .mobile-tabs{ position: fixed; left: 0; right: 0; bottom: 0; z-index: 1600; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; background: var(--panel-2); border-top: 1px solid var(--border); padding: 8px 10px; padding-bottom: max(10px, env(safe-area-inset-bottom, 10px)) }
-  .mobile-tabs .tab{ display: grid; justify-items: center; gap: 4px; color: var(--muted); text-decoration: none; padding: 6px 8px; border-radius: 10px; border: 1px solid transparent }
+  .mobile-tabs{ position: fixed; left: 0; right: 0; bottom: 0; z-index: 1600; display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; background: var(--panel-2); border-top: 1px solid var(--border); padding: 8px 10px; padding-bottom: max(10px, env(safe-area-inset-bottom, 10px)) }
+  .mobile-tabs .tab{ display: grid; grid-auto-flow: row; justify-items: center; align-items: center; gap: 4px; color: var(--muted); text-decoration: none; padding: 6px 6px; border-radius: 10px; border: 1px solid transparent; white-space: nowrap; min-width: 0 }
   .mobile-tabs .tab.active{ color: var(--fg); background: rgba(37,99,235,0.12); border-color: rgba(37,99,235,0.35) }
-  .mobile-tabs .tab .icon{ width: 22px; height: 22px; display: inline-grid; place-items: center }
+  .mobile-tabs .tab .icon{ width: 22px; height: 22px; display: inline-grid; place-items: center; position: relative }
   .with-mobile-tabs{ padding-bottom: 76px } /* give space above tabs */
 }
 
