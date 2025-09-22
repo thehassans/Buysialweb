@@ -183,6 +183,35 @@ router.get('/me', auth, async (req, res) => {
   res.json({ user: u })
 })
 
+// Update current agent availability (Available / Away / Busy)
+router.patch('/me/availability', auth, allowRoles('agent'), async (req, res) => {
+  try{
+    const { availability } = req.body || {}
+    const allowed = ['available','away','busy']
+    const val = String(availability || '').toLowerCase()
+    if (!allowed.includes(val)){
+      return res.status(400).json({ message: 'Invalid availability' })
+    }
+    const u = await User.findByIdAndUpdate(
+      req.user.id,
+      { $set: { availability: val } },
+      { new: true, projection: '-password' }
+    )
+    if (!u) return res.status(404).json({ message: 'User not found' })
+    // Broadcast to workspace so owner/user assign modals refresh live
+    try{
+      const io = getIO()
+      const ownerId = String(u.createdBy || '')
+      if (ownerId){ io.to(`workspace:${ownerId}`).emit('agent.updated', { id: String(u._id), availability: u.availability }) }
+      // Also notify the agent's own room
+      io.to(`user:${String(u._id)}`).emit('me.updated', { availability: u.availability })
+    }catch{}
+    return res.json({ ok: true, user: u })
+  }catch(err){
+    return res.status(500).json({ message: err?.message || 'failed' })
+  }
+})
+
 // Agent self performance: avg response time and quick counts
 router.get('/agents/me/performance', auth, async (req, res) => {
   const userId = req.user.id

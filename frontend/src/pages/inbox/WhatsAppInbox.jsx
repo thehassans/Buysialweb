@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { apiGet, apiPost, apiUpload, apiGetBlob, API_BASE } from '../../api.js'
+import { apiGet, apiPost, apiUpload, apiGetBlob, apiPatch, API_BASE } from '../../api.js'
 import { io } from 'socket.io-client'
 import Avatar from '../../ui/Avatar.jsx'
 import { parsePhoneNumberFromString } from 'libphonenumber-js'
@@ -94,6 +94,15 @@ export default function WhatsAppInbox(){
   const [newChatPhone, setNewChatPhone] = useState('')
   const [deleteMode, setDeleteMode] = useState(false)
   const [deletingJid, setDeletingJid] = useState(null)
+
+  // Agent "My Queue" counters (simple): Unread + Open
+  const myQueue = useMemo(()=>{
+    try{
+      const unread = chats.reduce((n,c)=> n + (!!(c?.unread || (typeof c?.unreadCount==='number' && c.unreadCount>0)) ? 1 : 0), 0)
+      const open = chats.length
+      return { unread, open }
+    }catch{ return { unread: 0, open: 0 } }
+  }, [chats])
 
   const filteredChats = useMemo(()=>{
     const isUnread = (c)=> !!(c?.unread || (typeof c?.unreadCount === 'number' && c.unreadCount > 0))
@@ -228,10 +237,27 @@ export default function WhatsAppInbox(){
   const myId = useMemo(()=>{
     try{ return (JSON.parse(localStorage.getItem('me')||'{}')||{}).id || null }catch{ return null }
   },[])
+  const [myAvailability, setMyAvailability] = useState('available')
+
+  // Load current agent availability on mount (for agents)
+  useEffect(()=>{
+    if (myRole !== 'agent') return
+    (async()=>{
+      try{
+        const r = await apiGet('/api/users/me')
+        const v = (r?.user?.availability) || 'available'
+        setMyAvailability(v)
+        try{ const me = JSON.parse(localStorage.getItem('me')||'{}'); me.availability = v; localStorage.setItem('me', JSON.stringify(me)) }catch{}
+      }catch{}
+    })()
+  }, [myRole])
 
   // Chat menu and modals
   const [showChatMenu, setShowChatMenu] = useState(false)
   const chatMenuRef = useRef(null)
+  // Agent availability dropdown
+  const [showAvail, setShowAvail] = useState(false)
+  const availRef = useRef(null)
   const [showNotesModal, setShowNotesModal] = useState(false)
   const [notes, setNotes] = useState([])
   const [newNote, setNewNote] = useState('')
@@ -263,6 +289,21 @@ export default function WhatsAppInbox(){
       const r = await apiGet('/api/wa/auto-assign')
       if (typeof r?.enabled === 'boolean') setAutoAssign(r.enabled)
     }catch(_e){}
+  }
+
+  // Update current agent availability
+  async function updateAvailability(v){
+    if (myRole !== 'agent') return
+    const val = String(v||'').toLowerCase()
+    setMyAvailability(val)
+    try{
+      await apiPatch('/api/users/me/availability', { availability: val })
+      try{ const me = JSON.parse(localStorage.getItem('me')||'{}'); me.availability = val; localStorage.setItem('me', JSON.stringify(me)) }catch{}
+    }catch(err){
+      alert(err?.message || 'Failed to update availability')
+    }finally{
+      setShowAvail(false)
+    }
   }
 
   // Navigate to Submit Order page for current area (user/agent)
@@ -528,6 +569,22 @@ export default function WhatsAppInbox(){
       }
     })
 
+    // Live agent updates (availability)
+    socket.on('agent.updated', ({ id, availability }) => {
+      try{
+        setAgents(prev => prev.map(a => (String(a?._id||a?.id) === String(id) ? { ...a, availability } : a)))
+      }catch{}
+    })
+    socket.on('me.updated', (payload) => {
+      try{
+        const v = payload?.availability
+        if (v){
+          setMyAvailability(v)
+          try{ const me = JSON.parse(localStorage.getItem('me')||'{}'); me.availability = v; localStorage.setItem('me', JSON.stringify(me)) }catch{}
+        }
+      }catch{}
+    })
+
     return ()=> socket.disconnect()
   },[])
 
@@ -543,10 +600,11 @@ export default function WhatsAppInbox(){
         setShowAttach(false)
       }
       if (showChatMenu && chatMenuRef.current && !chatMenuRef.current.contains(e.target)) setShowChatMenu(false)
+      if (showAvail && availRef.current && !availRef.current.contains(e.target)) setShowAvail(false)
     }
     document.addEventListener('mousedown', onDocClick)
     return ()=> document.removeEventListener('mousedown', onDocClick)
-  }, [showEmoji, showAttach, showChatMenu])
+  }, [showEmoji, showAttach, showChatMenu, showAvail])
 
   // Filter agents during Assign modal (debounced)
   useEffect(()=>{
@@ -554,11 +612,13 @@ export default function WhatsAppInbox(){
     const id = setTimeout(async ()=>{
       try{
         const r = await apiGet(`/api/users/agents?q=${encodeURIComponent(agentQuery||'')}`)
-        const list = r?.users || []
+        let list = r?.users || []
+        // Sort by availability: available > away > busy
+        const rank = (v)=> (v==='available'?0:(v==='away'?1:2))
+        list = list.slice().sort((a,b)=> rank(String(a?.availability||'available')) - rank(String(b?.availability||'available')))
         setAgents(list)
         if (!selectedAgent && list[0]) setSelectedAgent(list[0]._id || list[0].id)
-      }catch{}
-    }, 300)
+      }catch(_e){}}, 250)
     return ()=> clearTimeout(id)
   }, [agentQuery, showAssignModal])
 
@@ -592,8 +652,10 @@ export default function WhatsAppInbox(){
         apiGet('/api/users/agents')
       ])
       setAssignedTo(meta?.assignedTo||null)
-      setAgents(list?.users||[])
-      setSelectedAgent((list?.users?.[0]?._id || list?.users?.[0]?.id) || '')
+      const rank = (v)=> (v==='available'?0:(v==='away'?1:2))
+      const sorted = (list?.users||[]).slice().sort((a,b)=> rank(String(a?.availability||'available')) - rank(String(b?.availability||'available')))
+      setAgents(sorted)
+      setSelectedAgent((sorted?.[0]?._id || sorted?.[0]?.id) || '')
       setShowAssignModal(true)
     }catch(_e){} finally { setAgentsLoading(false); setShowChatMenu(false) }
   }
@@ -1461,6 +1523,12 @@ export default function WhatsAppInbox(){
     <div style={{position:'sticky', top:0, zIndex:1200, display:isMobile ? 'flex' : 'none', alignItems:'center', gap:10, height:MOBILE_HDR_H, background:'var(--wa-header)', borderBottom:'1px solid var(--border)', padding:'8px 10px'}}>
       <button className="btn secondary" onClick={()=> navigate(-1)} aria-label="Back" title="Back" style={{width:36,height:36,padding:0,display:'grid',placeItems:'center'}}>←</button>
       <div style={{fontWeight:800}}>Chats</div>
+      {myRole === 'agent' && (
+        <div style={{display:'flex', gap:8, marginLeft:6}}>
+          <span className="badge" style={{border:'1px solid var(--border)', borderRadius:999, padding:'2px 8px', fontSize:12}}>Unread {myQueue.unread}</span>
+          <span className="badge" style={{border:'1px solid var(--border)', borderRadius:999, padding:'2px 8px', fontSize:12}}>Open {myQueue.open}</span>
+        </div>
+      )}
       <div style={{marginLeft:'auto'}}>
         <button className="btn secondary" onClick={()=> loadChats()} title="Refresh" aria-label="Refresh" style={{width:36,height:36,padding:0,display:'grid',placeItems:'center'}}>↻</button>
       </div>
@@ -1482,9 +1550,24 @@ export default function WhatsAppInbox(){
             </div>
           )}
         </div>
-        <div style={{marginLeft:'auto', display:'flex', gap:6}}>
+        <div style={{marginLeft:'auto', display:'flex', gap:6, alignItems:'center'}}>
           {myRole === 'agent' ? (
-            <button className="btn success" onClick={goToSubmitOrder} title="Submit Order" aria-label="Submit Order">Submit Order</button>
+            <>
+              <div ref={availRef} style={{position:'relative'}}>
+                <button className="btn secondary small" onClick={()=> setShowAvail(s=>!s)} title="Availability" aria-label="Availability">
+                  <span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:(myAvailability==='available'?'#22c55e':(myAvailability==='busy'?'#ef4444':'#f59e0b')), marginRight:6}} />
+                  {myAvailability.charAt(0).toUpperCase() + myAvailability.slice(1)}
+                </button>
+                {showAvail && (
+                  <div className="dropdown-menu" style={{right:0}}>
+                    <button onClick={()=> updateAvailability('available')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#22c55e', marginRight:6}} />Available</button>
+                    <button onClick={()=> updateAvailability('away')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#f59e0b', marginRight:6}} />Away</button>
+                    <button onClick={()=> updateAvailability('busy')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#ef4444', marginRight:6}} />Busy</button>
+                  </div>
+                )}
+              </div>
+              <button className="btn success" onClick={goToSubmitOrder} title="Submit Order" aria-label="Submit Order">Submit Order</button>
+            </>
           ) : (
             <button className="btn" onClick={openAssign} title="Submit to Agent" aria-label="Submit to Agent">Submit to Agent</button>
           )}
@@ -1645,9 +1728,24 @@ export default function WhatsAppInbox(){
                   </div>
                 )}
               </div>
-              <div style={{marginLeft:'auto', display:'flex', gap:6}}>
+              <div style={{marginLeft:'auto', display:'flex', gap:6, alignItems:'center'}}>
                 {myRole === 'agent' ? (
-                  <button className="btn success" onClick={goToSubmitOrder} title="Submit Order" aria-label="Submit Order">Submit Order</button>
+                  <>
+                    <div ref={availRef} style={{position:'relative'}}>
+                      <button className="btn secondary small" onClick={()=> setShowAvail(s=>!s)} title="Availability" aria-label="Availability">
+                        <span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:(myAvailability==='available'?'#22c55e':(myAvailability==='busy'?'#ef4444':'#f59e0b')), marginRight:6}} />
+                        {myAvailability.charAt(0).toUpperCase() + myAvailability.slice(1)}
+                      </button>
+                      {showAvail && (
+                        <div className="dropdown-menu" style={{right:0}}>
+                          <button onClick={()=> updateAvailability('available')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#22c55e', marginRight:6}} />Available</button>
+                          <button onClick={()=> updateAvailability('away')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#f59e0b', marginRight:6}} />Away</button>
+                          <button onClick={()=> updateAvailability('busy')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#ef4444', marginRight:6}} />Busy</button>
+                        </div>
+                      )}
+                    </div>
+                    <button className="btn success" onClick={goToSubmitOrder} title="Submit Order" aria-label="Submit Order">Submit Order</button>
+                  </>
                 ) : (
                   <button className="btn" onClick={openAssign} title="Submit to Agent" aria-label="Submit to Agent">Submit to Agent</button>
                 )}
@@ -1863,7 +1961,13 @@ export default function WhatsAppInbox(){
                   <label key={id} style={{display:'flex', alignItems:'center', gap:8, padding:'6px 8px', borderRadius:6, cursor:'pointer', background: (selectedAgent===id?'var(--panel-2)':'transparent')}}>
                     <input type="radio" name="agent" checked={selectedAgent===id} onChange={()=> setSelectedAgent(id)} />
                     <div style={{display:'grid'}}>
-                      <div style={{fontWeight:600}}>{label}</div>
+                      <div style={{fontWeight:600, display:'flex', alignItems:'center', gap:8}}>
+                        <span>{label}</span>
+                        <span title="Availability" aria-label="Availability" style={{display:'inline-flex', alignItems:'center', gap:6, fontWeight:500, fontSize:12, opacity:0.9}}>
+                          <span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:(a.availability==='available'?'#22c55e':(a.availability==='busy'?'#ef4444':'#f59e0b'))}} />
+                          <span>{(a.availability||'available').charAt(0).toUpperCase() + (a.availability||'available').slice(1)}</span>
+                        </span>
+                      </div>
                       <div className="helper" style={{fontSize:12}}>{a.email || ''}{a.phone ? ` · ${a.phone}` : ''}</div>
                     </div>
                   </label>
