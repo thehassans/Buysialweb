@@ -56,7 +56,7 @@ router.post('/agents', auth, allowRoles('admin','user','manager'), async (req, r
       const digits = String(phone||'').replace(/\D/g,'')
       if (digits) {
         const jid = `${digits}@s.whatsapp.net`
-        const text = `Welcome to the team, ${firstName} ${lastName}!\nWe're excited to have you with us. You can log in to access your dashboard at web.buysial.com/login.\nHere are your login credentials: Email: ${email} Password: ${password}`
+        const text = `Welcome to the Buysial team, ${firstName} ${lastName}!\n\nTo get started, please watch the guide video to download the application. Your login credentials are provided below:\n\nEmail: ${email}\nPassword: ${password}`
         const wa = await getWA()
         await wa.sendText(jid, text)
       }
