@@ -7,7 +7,12 @@ import { getIO } from '../config/socket.js';
 async function getWA(){
   const enabled = process.env.ENABLE_WA !== 'false'
   if (!enabled) return { sendText: async ()=> ({ ok:true }) }
-  try{ return await import('../services/whatsapp.js') }catch(_e){ return { sendText: async ()=> ({ ok:true }) } }
+  try{
+    const mod = await import('../services/whatsapp.js')
+    return mod?.default || mod
+  }catch(_e){
+    return { sendText: async ()=> ({ ok:true }) }
+  }
 }
 import ChatAssignment from '../models/ChatAssignment.js'
 import Order from '../models/Order.js'
