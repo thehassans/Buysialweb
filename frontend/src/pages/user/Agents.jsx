@@ -174,7 +174,7 @@ export default function Agents(){
 
       {/* Create Agent (hidden if manager lacks permission) */}
       {canCreate && (
-      <div className="card">
+      <div className="card shadow-sm">
         <div className="card-header">
           <div className="card-title modern">Create Agent</div>
           <div className="card-subtitle">Invite a new agent to your workspace</div>
@@ -227,31 +227,31 @@ export default function Agents(){
           <input className="input" placeholder="Search by name, email, phone" value={q} onChange={e=>setQ(e.target.value)} style={{maxWidth:320}}/>
         </div>
         <div style={{overflow:'auto'}}>
-          <table style={{width:'100%', borderCollapse:'separate', borderSpacing:0}}>
+          <table className="min-w-full text-sm" style={{width:'100%', borderCollapse:'separate', borderSpacing:0}}>
             <thead>
               <tr>
-                <th style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Name</th>
-                <th style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Email</th>
-                <th style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Phone</th>
-                <th style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Welcome</th>
-                <th style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Assigned</th>
-                <th style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Done</th>
-                <th style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Avg Response</th>
-                <th style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Created</th>
-                <th style={{textAlign:'right', padding:'10px 12px', position:'sticky', top:0}}>Actions</th>
+                <th className="bg-[var(--panel-2)]" style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Name</th>
+                <th className="bg-[var(--panel-2)]" style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Email</th>
+                <th className="bg-[var(--panel-2)]" style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Phone</th>
+                <th className="bg-[var(--panel-2)]" style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Welcome</th>
+                <th className="bg-[var(--panel-2)]" style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Assigned</th>
+                <th className="bg-[var(--panel-2)]" style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Done</th>
+                <th className="bg-[var(--panel-2)]" style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Avg Response</th>
+                <th className="bg-[var(--panel-2)]" style={{textAlign:'left', padding:'10px 12px', position:'sticky', top:0}}>Created</th>
+                <th className="bg-[var(--panel-2)]" style={{textAlign:'right', padding:'10px 12px', position:'sticky', top:0}}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {loadingList ? (
-                <tr><td colSpan={9} style={{padding:12, opacity:0.7}}>Loading...</td></tr>
+                <tr className="opacity-80"><td colSpan={9} style={{padding:12}}>Loading...</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={9} style={{padding:12, opacity:0.7}}>No agents found</td></tr>
+                <tr className="opacity-80"><td colSpan={9} style={{padding:12}}>No agents found</td></tr>
               ) : (
                 rows.map(u=> {
                   const uid = String(u.id || u._id || '')
                   const m = metrics.find(m=> String(m.id||'') === uid)
                   return (
-                  <tr key={uid || u.email || `${u.firstName}-${u.lastName}`} style={{borderTop:'1px solid var(--border)'}}>
+                  <tr key={uid || u.email || `${u.firstName}-${u.lastName}`} className="hover:bg-black/5 dark:hover:bg-white/5" style={{borderTop:'1px solid var(--border)'}}>
                     <td style={{padding:'10px 12px'}}>{u.firstName} {u.lastName}</td>
                     <td style={{padding:'10px 12px'}}>{u.email}</td>
                     <td style={{padding:'10px 12px'}}>{u.phone||'-'}</td>

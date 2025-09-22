@@ -79,24 +79,15 @@ export default function UserLogin(){
   }
 
   return (
-    <div style={{ minHeight:'100%', display:'grid', gridTemplateRows:'auto 1fr' }}>
+    <div className="min-h-screen grid grid-rows-[auto_1fr] bg-[var(--bg)] text-[var(--fg)]">
       {/* Header bar using same theme as sidebar/header */}
-      <div className="header" style={{display:'flex', alignItems:'center', justifyContent:'center', background:'var(--sidebar-bg)', borderBottom:'1px solid var(--sidebar-border)', padding:'10px 0'}}>
-        {/* Brand removed per request to keep header clean on login */}
+      <div className="header flex items-center justify-center" style={{background:'var(--sidebar-bg)', borderBottom:'1px solid var(--sidebar-border)', padding:'10px 0'}}>
+        {/* Brand minimal header */}
       </div>
 
       {/* Main content */}
-      <div style={{display:'grid', placeItems:'center', padding:'24px'}}>
-        <form onSubmit={login} className="card" style={{
-          width:'min(420px, 96vw)',
-          display:'grid',
-          gap:12,
-          borderRadius:14,
-          border:'1px solid var(--border)',
-          background:'var(--panel)',
-          backdropFilter:'none',
-          boxShadow:'0 20px 60px rgba(0,0,0,.18)'
-        }}>
+      <div className="grid place-items-center p-6 md:p-8">
+        <form onSubmit={login} className="card w-[min(420px,96vw)] grid gap-3 rounded-xl border border-[var(--border)] bg-[var(--panel)] shadow-[0_20px_60px_rgba(0,0,0,.18)] p-4 md:p-5">
           <div style={{display:'grid', placeItems:'center', gap:8}}>
             {(()=>{
               const fallback = `${import.meta.env.BASE_URL}BuySial2.png`
@@ -104,7 +95,7 @@ export default function UserLogin(){
               return <img src={src} alt="BuySial" style={{width:64, height:64, borderRadius:16, objectFit:'contain', background:'#fff'}}/>
             })()}
             <div className="page-title gradient heading-brand" style={{ fontSize:28, letterSpacing:'.3px' }}>Welcome</div>
-            <div className="helper" style={{textAlign:'center'}}>Sign in to access your dashboard</div>
+            <div className="helper text-center">Sign in to access your dashboard</div>
           </div>
 
           <div>
@@ -115,15 +106,15 @@ export default function UserLogin(){
             <div className="label">Password</div>
             <PasswordInput value={password} onChange={setPassword} autoComplete="current-password"/>
           </div>
-          <div style={{textAlign:'right',marginTop:2}}>
+          <div className="text-right mt-0.5">
             <a href="#" onClick={(e)=>{e.preventDefault(); toast.info('Forgot password coming soon') }}>Forgot password?</a>
           </div>
 
-          <button className="btn" style={{marginTop:4}} disabled={loading}>
+          <button className="btn mt-1" disabled={loading}>
             {loading? 'Signing in…' : 'Login'}
           </button>
 
-          <div style={{marginTop:8, display:'grid', gap:6}}>
+          <div className="grid gap-1.5 mt-2">
             {(()=>{
               const dbLabel = String(health.dbLabel||'').toLowerCase()
               const allGood = health.ok && dbLabel === 'connected'
@@ -131,7 +122,7 @@ export default function UserLogin(){
               const apiLabel = health.ok ? 'ok' : 'down'
               const statusText = `API: ${apiLabel} · DB: ${health.dbLabel || 'unknown'}`
               return (
-                <div style={{display:'flex', justifyContent:'center'}}>
+                <div className="flex justify-center">
                   <button type="button" className="btn danger" title={statusText} onClick={()=>window.location.reload()}>
                     Connection issue
                   </button>
