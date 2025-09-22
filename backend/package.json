@@ -6,8 +6,7 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
-    "lint": "echo 'no lint configured'",
-    "migrate:chatassignment": "node scripts/migrate-chatassignment-jid.js"
+    "lint": "echo 'no lint configured'"
   },
   "nodemonConfig": {
     "watch": [

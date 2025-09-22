@@ -11,7 +11,7 @@ const UserSchema = new mongoose.Schema({
   city: { type: String, default: '' },
   role: { type: String, enum: ['admin','user','agent','manager','investor','driver'], default: 'user', index: true },
   // Agent availability status for assignment visibility and routing
-  availability: { type: String, enum: ['available','away','busy'], default: 'available', index: true },
+  availability: { type: String, enum: ['available','away','busy','offline'], default: 'available', index: true },
   // For agents/managers/investors created by a user/company (workspace owner)
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   // Manager-specific permission flags (only applicable when role === 'manager')

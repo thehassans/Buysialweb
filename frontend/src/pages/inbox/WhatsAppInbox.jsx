@@ -613,8 +613,8 @@ export default function WhatsAppInbox(){
       try{
         const r = await apiGet(`/api/users/agents?q=${encodeURIComponent(agentQuery||'')}`)
         let list = r?.users || []
-        // Sort by availability: available > away > busy
-        const rank = (v)=> (v==='available'?0:(v==='away'?1:2))
+        // Sort by availability: available > away > busy > offline
+        const rank = (v)=> (v==='available'?0:(v==='away'?1:(v==='busy'?2:3)))
         list = list.slice().sort((a,b)=> rank(String(a?.availability||'available')) - rank(String(b?.availability||'available')))
         setAgents(list)
         if (!selectedAgent && list[0]) setSelectedAgent(list[0]._id || list[0].id)
@@ -652,7 +652,7 @@ export default function WhatsAppInbox(){
         apiGet('/api/users/agents')
       ])
       setAssignedTo(meta?.assignedTo||null)
-      const rank = (v)=> (v==='available'?0:(v==='away'?1:2))
+      const rank = (v)=> (v==='available'?0:(v==='away'?1:(v==='busy'?2:3)))
       const sorted = (list?.users||[]).slice().sort((a,b)=> rank(String(a?.availability||'available')) - rank(String(b?.availability||'available')))
       setAgents(sorted)
       setSelectedAgent((sorted?.[0]?._id || sorted?.[0]?.id) || '')
@@ -1555,7 +1555,7 @@ export default function WhatsAppInbox(){
             <>
               <div ref={availRef} style={{position:'relative'}}>
                 <button className="btn secondary small" onClick={()=> setShowAvail(s=>!s)} title="Availability" aria-label="Availability">
-                  <span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:(myAvailability==='available'?'#22c55e':(myAvailability==='busy'?'#ef4444':'#f59e0b')), marginRight:6}} />
+                  <span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:(myAvailability==='available'?'#22c55e':(myAvailability==='busy'?'#ef4444':(myAvailability==='offline'?'#6b7280':'#f59e0b'))), marginRight:6}} />
                   {myAvailability.charAt(0).toUpperCase() + myAvailability.slice(1)}
                 </button>
                 {showAvail && (
@@ -1563,6 +1563,7 @@ export default function WhatsAppInbox(){
                     <button onClick={()=> updateAvailability('available')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#22c55e', marginRight:6}} />Available</button>
                     <button onClick={()=> updateAvailability('away')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#f59e0b', marginRight:6}} />Away</button>
                     <button onClick={()=> updateAvailability('busy')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#ef4444', marginRight:6}} />Busy</button>
+                    <button onClick={()=> updateAvailability('offline')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#6b7280', marginRight:6}} />Offline</button>
                   </div>
                 )}
               </div>
@@ -1733,7 +1734,7 @@ export default function WhatsAppInbox(){
                   <>
                     <div ref={availRef} style={{position:'relative'}}>
                       <button className="btn secondary small" onClick={()=> setShowAvail(s=>!s)} title="Availability" aria-label="Availability">
-                        <span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:(myAvailability==='available'?'#22c55e':(myAvailability==='busy'?'#ef4444':'#f59e0b')), marginRight:6}} />
+                        <span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:(myAvailability==='available'?'#22c55e':(myAvailability==='busy'?'#ef4444':(myAvailability==='offline'?'#6b7280':'#f59e0b'))), marginRight:6}} />
                         {myAvailability.charAt(0).toUpperCase() + myAvailability.slice(1)}
                       </button>
                       {showAvail && (
@@ -1741,6 +1742,7 @@ export default function WhatsAppInbox(){
                           <button onClick={()=> updateAvailability('available')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#22c55e', marginRight:6}} />Available</button>
                           <button onClick={()=> updateAvailability('away')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#f59e0b', marginRight:6}} />Away</button>
                           <button onClick={()=> updateAvailability('busy')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#ef4444', marginRight:6}} />Busy</button>
+                          <button onClick={()=> updateAvailability('offline')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#6b7280', marginRight:6}} />Offline</button>
                         </div>
                       )}
                     </div>
@@ -1964,7 +1966,7 @@ export default function WhatsAppInbox(){
                       <div style={{fontWeight:600, display:'flex', alignItems:'center', gap:8}}>
                         <span>{label}</span>
                         <span title="Availability" aria-label="Availability" style={{display:'inline-flex', alignItems:'center', gap:6, fontWeight:500, fontSize:12, opacity:0.9}}>
-                          <span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:(a.availability==='available'?'#22c55e':(a.availability==='busy'?'#ef4444':'#f59e0b'))}} />
+                          <span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:(a.availability==='available'?'#22c55e':(a.availability==='busy'?'#ef4444':(a.availability==='offline'?'#6b7280':'#f59e0b')))}} />
                           <span>{(a.availability||'available').charAt(0).toUpperCase() + (a.availability||'available').slice(1)}</span>
                         </span>
                       </div>

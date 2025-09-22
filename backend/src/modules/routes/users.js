@@ -187,7 +187,7 @@ router.get('/me', auth, async (req, res) => {
 router.patch('/me/availability', auth, allowRoles('agent'), async (req, res) => {
   try{
     const { availability } = req.body || {}
-    const allowed = ['available','away','busy']
+    const allowed = ['available','away','busy','offline']
     const val = String(availability || '').toLowerCase()
     if (!allowed.includes(val)){
       return res.status(400).json({ message: 'Invalid availability' })
@@ -207,6 +207,27 @@ router.patch('/me/availability', auth, allowRoles('agent'), async (req, res) => 
       io.to(`user:${String(u._id)}`).emit('me.updated', { availability: u.availability })
     }catch{}
     return res.json({ ok: true, user: u })
+  }catch(err){
+    return res.status(500).json({ message: err?.message || 'failed' })
+  }
+})
+
+// Change own password (all authenticated roles)
+router.patch('/me/password', auth, async (req, res) => {
+  try{
+    const { currentPassword = '', newPassword = '' } = req.body || {}
+    const cur = String(currentPassword||'').trim()
+    const next = String(newPassword||'').trim()
+    if (!cur || !next || next.length < 6){
+      return res.status(400).json({ message: 'Invalid password' })
+    }
+    const user = await User.findById(req.user.id)
+    if (!user) return res.status(404).json({ message: 'User not found' })
+    const ok = await user.comparePassword(cur)
+    if (!ok) return res.status(400).json({ message: 'Current password is incorrect' })
+    user.password = next
+    await user.save()
+    return res.json({ ok: true, message: 'Password updated successfully' })
   }catch(err){
     return res.status(500).json({ message: err?.message || 'failed' })
   }

@@ -1,12 +1,22 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Outlet, useLocation, NavLink, useNavigate } from 'react-router-dom'
-import { API_BASE } from '../api.js'
+import { API_BASE, apiGet } from '../api.js'
 
 export default function AgentLayout(){
   const [closed, setClosed] = useState(()=> (typeof window!=='undefined' ? window.innerWidth <= 768 : false))
   const location = useLocation()
   const navigate = useNavigate()
   const [isMobile, setIsMobile] = useState(()=> (typeof window!=='undefined' ? window.innerWidth <= 768 : false))
+  // Badges state
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [ordersSubmitted, setOrdersSubmitted] = useState(0)
+  const levelThresholds = useMemo(()=> [0,5,50,100,250,500], [])
+  const levelIdx = useMemo(()=>{
+    const n = Number(ordersSubmitted||0)
+    let idx = 0
+    for (let i=0;i<levelThresholds.length;i++){ if (n >= levelThresholds[i]) idx = i; else break }
+    return idx
+  }, [ordersSubmitted, levelThresholds])
   const [theme, setTheme] = useState(()=>{
     try{
       return localStorage.getItem('theme') || 'dark'
@@ -24,6 +34,32 @@ export default function AgentLayout(){
     window.addEventListener('resize', onResize)
     return ()=> window.removeEventListener('resize', onResize)
   },[])
+
+  // Badges: unread inbox and orders submitted (for level & badge)
+  useEffect(()=>{
+    let alive = true
+    async function refresh(){
+      try{
+        const chats = await apiGet('/api/wa/chats')
+        if (!alive) return
+        const sum = Array.isArray(chats) ? chats.reduce((acc,c)=>{
+          const mc = (typeof c.unreadCount === 'number' ? c.unreadCount : (c.unread ? 1 : 0))
+          return acc + (mc||0)
+        }, 0) : 0
+        setUnreadCount(sum)
+      }catch{}
+      try{
+        const perf = await apiGet('/api/users/agents/me/performance')
+        if (!alive) return
+        setOrdersSubmitted(Number(perf?.ordersSubmitted||0))
+      }catch{}
+    }
+    refresh()
+    const onFocus = ()=> refresh()
+    window.addEventListener('focus', onFocus)
+    const id = setInterval(refresh, 30000)
+    return ()=>{ alive=false; window.removeEventListener('focus', onFocus); clearInterval(id) }
+  }, [])
   const me = JSON.parse(localStorage.getItem('me') || '{}')
   const [showWelcome, setShowWelcome] = useState(true)
   useEffect(()=>{
@@ -59,6 +95,7 @@ export default function AgentLayout(){
     { to: '/agent/inbox/whatsapp', label: 'Inbox', icon: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
     { to: '/agent/orders', label: 'Orders', icon: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg> },
     { to: '/agent/inhouse-products', label: 'Products', icon: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg> },
+    { to: '/agent/me', label: 'Me', icon: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
   ]
 
   // On mobile, the bottom tabs are always visible, and the sidebar is always hidden.
@@ -237,12 +274,31 @@ export default function AgentLayout(){
       {/* Mobile bottom tabs (root only) */}
       {tabsVisible && (
         <nav className="mobile-tabs" role="navigation" aria-label="Primary">
-          {mobileTabs.map(tab => (
-            <NavLink key={tab.to} to={tab.to} end={tab.to === '/agent'} className={({isActive})=>`tab ${isActive?'active':''}`}>
-              <span className="icon">{tab.icon}</span>
-              <span style={{fontSize:11}}>{tab.label}</span>
-            </NavLink>
-          ))}
+          {mobileTabs.map(tab => {
+            const isInbox = tab.to.includes('/inbox/whatsapp')
+            const isOrders = tab.to.endsWith('/orders')
+            const isMe = tab.to.endsWith('/me')
+            const count = isInbox ? unreadCount : (isOrders ? ordersSubmitted : 0)
+            const showCount = isInbox && count > 0
+            const meBadge = isMe ? `Lv ${levelIdx}` : ''
+            return (
+              <NavLink key={tab.to} to={tab.to} end={tab.to === '/agent'} className={({isActive})=>`tab ${isActive?'active':''}`}>
+                <span className="icon" style={{position:'relative'}}>
+                  {tab.icon}
+                  {showCount && (
+                    <span className="badge" style={{position:'absolute', top:-4, right:-10, fontSize:10, padding:'0 6px', borderRadius:999}}>{count > 99 ? '99+' : count}</span>
+                  )}
+                </span>
+                <span style={{fontSize:11}}>{tab.label}</span>
+                {isOrders && count>0 && (
+                  <span className="badge" style={{marginLeft:6, fontSize:10}}>{count > 99 ? '99+' : count}</span>
+                )}
+                {isMe && (
+                  <span className="badge" style={{marginLeft:6, fontSize:10}}>{meBadge}</span>
+                )}
+              </NavLink>
+            )
+          })}
         </nav>
       )}
       {showWelcome && (

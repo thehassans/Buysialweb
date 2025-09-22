@@ -1,17 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { apiGet, apiPost, apiDelete } from '../../api.js'
+import { apiGet, apiPost } from '../../api.js'
 import Modal from '../../components/Modal.jsx'
 import PasswordInput from '../../components/PasswordInput.jsx'
 import PhoneInput from 'react-phone-number-input'
 import { getCountries, getCountryCallingCode } from 'libphonenumber-js'
 import 'react-phone-number-input/style.css'
-import { useToast } from '../../ui/Toast.jsx'
 
 export default function AdminUsers(){
-  const toast = useToast()
   const [users, setUsers] = useState([])
   const [open, setOpen] = useState(false)
-  const [deletingId, setDeletingId] = useState(null)
 
   async function load(){
     const { users } = await apiGet('/api/users')
@@ -113,7 +110,6 @@ export default function AdminUsers(){
               <th>Email</th>
               <th>Role</th>
               <th>Created</th>
-              <th style={{textAlign:'right'}}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -123,29 +119,6 @@ export default function AdminUsers(){
                 <td>{u.email}</td>
                 <td>{u.role}</td>
                 <td>{new Date(u.createdAt).toLocaleString()}</td>
-                <td style={{textAlign:'right'}}>
-                  {u.role === 'admin' ? null : (
-                    <button
-                      className="btn danger"
-                      disabled={deletingId === u._id}
-                      onClick={async ()=>{
-                        if (!confirm('Delete this user?')) return
-                        try{
-                          setDeletingId(u._id)
-                          await apiDelete(`/api/users/${u._id}`)
-                          try{ toast.success('User deleted') }catch{}
-                          load()
-                        }catch(e){
-                          try{ toast.error(e?.message || 'Failed to delete user') }catch{}
-                        }finally{
-                          setDeletingId(null)
-                        }
-                      }}
-                    >
-                      {deletingId === u._id ? 'Deleting...' : 'Delete'}
-                    </button>
-                  )}
-                </td>
               </tr>
             ))}
           </tbody>

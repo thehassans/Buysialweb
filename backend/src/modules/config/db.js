@@ -51,10 +51,6 @@ export async function connectDB() {
     serverSelectionTimeoutMS: 30000,
     socketTimeoutMS: 60000,
     family: 4,
-    // Low-load pool sizing (tunable via env)
-    maxPoolSize: Number(process.env.MONGO_MAX_POOL_SIZE || 5),
-    minPoolSize: Number(process.env.MONGO_MIN_POOL_SIZE || 0),
-    maxIdleTimeMS: Number(process.env.MONGO_MAX_IDLE_TIME_MS || 60000),
   }
   console.log('[mongo] connecting...', { uri: maskUri(uri), dbName: dbName || '(from URI)' })
   try{
