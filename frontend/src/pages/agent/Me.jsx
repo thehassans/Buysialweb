@@ -201,6 +201,31 @@ export default function AgentMe(){
 
   return (
     <div className="content" style={{display:'grid', gap:16, padding:16, maxWidth: 900, margin:'0 auto'}}>
+      {/* Profile at top */}
+      <div style={{display:'grid', gap:6}}>
+        <div style={{fontWeight:800, fontSize:20}}>Profile</div>
+        <div className="helper">Manage your availability, view your achievements and update your password.</div>
+      </div>
+      {/* Profile Card */}
+      <div className="panel" style={{display:'grid', gap:12}}>
+        <div style={{display:'flex', alignItems:'center', gap:12}}>
+          <div style={{width:44, height:44, borderRadius:999, background:'var(--panel-2)', display:'grid', placeItems:'center', fontWeight:800}}>
+            {((me.firstName||'')[0]||'A').toUpperCase()}
+          </div>
+          <div style={{display:'grid'}}>
+            <div style={{fontWeight:800}}>{(me.firstName||'') + ' ' + (me.lastName||'')}</div>
+            <div className="helper" style={{fontSize:12}}>{me.email || ''}{me.phone ? ` · ${me.phone}` : ''}</div>
+          </div>
+          <div style={{marginLeft:'auto', display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
+            {pill('Available', 'available')}
+            {pill('Away', 'away')}
+            {pill('Busy', 'busy')}
+            {pill('Offline', 'offline')}
+          </div>
+        </div>
+        <div className="helper" style={{fontSize:12}}>Current status: <b>{availability[0].toUpperCase()+availability.slice(1)}</b></div>
+      </div>
+
       {/* Setup Me */}
       <div className="panel" style={{display:'grid', gap:12}}>
         <div style={{display:'flex', alignItems:'center', gap:8}}>
@@ -242,30 +267,7 @@ export default function AgentMe(){
           </div>
         </div>
       </div>
-      <div style={{display:'grid', gap:6}}>
-        <div style={{fontWeight:800, fontSize:20}}>Me</div>
-        <div className="helper">Manage your availability, view your achievements and update your password.</div>
-      </div>
-
-      {/* Profile Card */}
-      <div className="panel" style={{display:'grid', gap:12}}>
-        <div style={{display:'flex', alignItems:'center', gap:12}}>
-          <div style={{width:44, height:44, borderRadius:999, background:'var(--panel-2)', display:'grid', placeItems:'center', fontWeight:800}}>
-            {((me.firstName||'')[0]||'A').toUpperCase()}
-          </div>
-          <div style={{display:'grid'}}>
-            <div style={{fontWeight:800}}>{(me.firstName||'') + ' ' + (me.lastName||'')}</div>
-            <div className="helper" style={{fontSize:12}}>{me.email || ''}{me.phone ? ` · ${me.phone}` : ''}</div>
-          </div>
-          <div style={{marginLeft:'auto', display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
-            {pill('Available', 'available')}
-            {pill('Away', 'away')}
-            {pill('Busy', 'busy')}
-            {pill('Offline', 'offline')}
-          </div>
-        </div>
-        <div className="helper" style={{fontSize:12}}>Current status: <b>{availability[0].toUpperCase()+availability.slice(1)}</b></div>
-      </div>
+      
 
       {/* Achievements */}
       <div className="panel" style={{display:'grid', gap:12}}>

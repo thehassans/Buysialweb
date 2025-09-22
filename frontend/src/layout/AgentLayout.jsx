@@ -280,7 +280,8 @@ export default function AgentLayout(){
             const isMe = tab.to.endsWith('/me')
             const count = isInbox ? unreadCount : (isOrders ? ordersSubmitted : 0)
             const showCount = isInbox && count > 0
-            const meBadge = isMe ? `Lv ${levelIdx}` : ''
+            // Show level badge only when levelIdx > 0
+            const meBadge = (isMe && levelIdx > 0) ? `Lv ${levelIdx}` : ''
             return (
               <NavLink key={tab.to} to={tab.to} end={tab.to === '/agent'} className={({isActive})=>`tab ${isActive?'active':''}`}>
                 <span className="icon" style={{position:'relative'}}>
@@ -293,7 +294,7 @@ export default function AgentLayout(){
                 {isOrders && count>0 && (
                   <span className="badge" style={{marginLeft:6, fontSize:10}}>{count > 99 ? '99+' : count}</span>
                 )}
-                {isMe && (
+                {isMe && meBadge && (
                   <span className="badge" style={{marginLeft:6, fontSize:10}}>{meBadge}</span>
                 )}
               </NavLink>

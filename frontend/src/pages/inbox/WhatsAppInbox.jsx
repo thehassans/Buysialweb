@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { apiGet, apiPost, apiUpload, apiGetBlob, apiPatch, API_BASE } from '../../api.js'
+import { apiGet, apiPost, apiUpload, apiGetBlob, API_BASE } from '../../api.js'
 import { io } from 'socket.io-client'
 import Avatar from '../../ui/Avatar.jsx'
 import { parsePhoneNumberFromString } from 'libphonenumber-js'
@@ -238,27 +238,15 @@ export default function WhatsAppInbox(){
   const myId = useMemo(()=>{
     try{ return (JSON.parse(localStorage.getItem('me')||'{}')||{}).id || null }catch{ return null }
   },[])
-  const [myAvailability, setMyAvailability] = useState('available')
+  // Availability is managed on the Me page; the inbox UI does not expose controls
 
-  // Load current agent availability on mount (for agents)
-  useEffect(()=>{
-    if (myRole !== 'agent') return
-    (async()=>{
-      try{
-        const r = await apiGet('/api/users/me')
-        const v = (r?.user?.availability) || 'available'
-        setMyAvailability(v)
-        try{ const me = JSON.parse(localStorage.getItem('me')||'{}'); me.availability = v; localStorage.setItem('me', JSON.stringify(me)) }catch{}
-      }catch{}
-    })()
-  }, [myRole])
+  // Availability is loaded and updated on Me page; no-op here
+  useEffect(()=>{}, [myRole])
 
   // Chat menu and modals
   const [showChatMenu, setShowChatMenu] = useState(false)
   const chatMenuRef = useRef(null)
-  // Agent availability dropdown
-  const [showAvail, setShowAvail] = useState(false)
-  const availRef = useRef(null)
+  // Availability dropdown removed from Inbox; managed in Me page
   const [showNotesModal, setShowNotesModal] = useState(false)
   const [notes, setNotes] = useState([])
   const [newNote, setNewNote] = useState('')
@@ -290,21 +278,6 @@ export default function WhatsAppInbox(){
       const r = await apiGet('/api/wa/auto-assign')
       if (typeof r?.enabled === 'boolean') setAutoAssign(r.enabled)
     }catch(_e){}
-  }
-
-  // Update current agent availability
-  async function updateAvailability(v){
-    if (myRole !== 'agent') return
-    const val = String(v||'').toLowerCase()
-    setMyAvailability(val)
-    try{
-      await apiPatch('/api/users/me/availability', { availability: val })
-      try{ const me = JSON.parse(localStorage.getItem('me')||'{}'); me.availability = val; localStorage.setItem('me', JSON.stringify(me)) }catch{}
-    }catch(err){
-      alert(err?.message || 'Failed to update availability')
-    }finally{
-      setShowAvail(false)
-    }
   }
 
   // Navigate to Submit Order page for current area (user/agent)
@@ -576,15 +549,7 @@ export default function WhatsAppInbox(){
         setAgents(prev => prev.map(a => (String(a?._id||a?.id) === String(id) ? { ...a, availability } : a)))
       }catch{}
     })
-    socket.on('me.updated', (payload) => {
-      try{
-        const v = payload?.availability
-        if (v){
-          setMyAvailability(v)
-          try{ const me = JSON.parse(localStorage.getItem('me')||'{}'); me.availability = v; localStorage.setItem('me', JSON.stringify(me)) }catch{}
-        }
-      }catch{}
-    })
+    // Availability updates for the current agent are handled via Me page. Keep agent.updated for lists.
 
     return ()=> socket.disconnect()
   },[])
@@ -601,11 +566,10 @@ export default function WhatsAppInbox(){
         setShowAttach(false)
       }
       if (showChatMenu && chatMenuRef.current && !chatMenuRef.current.contains(e.target)) setShowChatMenu(false)
-      if (showAvail && availRef.current && !availRef.current.contains(e.target)) setShowAvail(false)
     }
     document.addEventListener('mousedown', onDocClick)
     return ()=> document.removeEventListener('mousedown', onDocClick)
-  }, [showEmoji, showAttach, showChatMenu, showAvail])
+  }, [showEmoji, showAttach, showChatMenu])
 
   // Filter agents during Assign modal (debounced)
   useEffect(()=>{
@@ -1633,23 +1597,7 @@ export default function WhatsAppInbox(){
         </div>
         <div style={{marginLeft:'auto', display:'flex', gap:6, alignItems:'center'}}>
           {myRole === 'agent' ? (
-            <>
-              <div ref={availRef} style={{position:'relative'}}>
-                <button className="btn secondary small" onClick={()=> setShowAvail(s=>!s)} title="Availability" aria-label="Availability">
-                  <span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:(myAvailability==='available'?'#22c55e':(myAvailability==='busy'?'#ef4444':(myAvailability==='offline'?'#6b7280':'#f59e0b'))), marginRight:6}} />
-                  {myAvailability.charAt(0).toUpperCase() + myAvailability.slice(1)}
-                </button>
-                {showAvail && (
-                  <div className="dropdown-menu" style={{right:0}}>
-                    <button onClick={()=> updateAvailability('available')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#22c55e', marginRight:6}} />Available</button>
-                    <button onClick={()=> updateAvailability('away')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#f59e0b', marginRight:6}} />Away</button>
-                    <button onClick={()=> updateAvailability('busy')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#ef4444', marginRight:6}} />Busy</button>
-                    <button onClick={()=> updateAvailability('offline')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#6b7280', marginRight:6}} />Offline</button>
-                  </div>
-                )}
-              </div>
-              <button className="btn success" onClick={goToSubmitOrder} title="Submit Order" aria-label="Submit Order">Submit Order</button>
-            </>
+            <button className="btn success" onClick={goToSubmitOrder} title="Submit Order" aria-label="Submit Order">Submit Order</button>
           ) : (
             <button className="btn" onClick={openAssign} title="Submit to Agent" aria-label="Submit to Agent">Submit to Agent</button>
           )}
@@ -1812,23 +1760,7 @@ export default function WhatsAppInbox(){
               </div>
               <div style={{marginLeft:'auto', display:'flex', gap:6, alignItems:'center'}}>
                 {myRole === 'agent' ? (
-                  <>
-                    <div ref={availRef} style={{position:'relative'}}>
-                      <button className="btn secondary small" onClick={()=> setShowAvail(s=>!s)} title="Availability" aria-label="Availability">
-                        <span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:(myAvailability==='available'?'#22c55e':(myAvailability==='busy'?'#ef4444':(myAvailability==='offline'?'#6b7280':'#f59e0b'))), marginRight:6}} />
-                        {myAvailability.charAt(0).toUpperCase() + myAvailability.slice(1)}
-                      </button>
-                      {showAvail && (
-                        <div className="dropdown-menu" style={{right:0}}>
-                          <button onClick={()=> updateAvailability('available')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#22c55e', marginRight:6}} />Available</button>
-                          <button onClick={()=> updateAvailability('away')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#f59e0b', marginRight:6}} />Away</button>
-                          <button onClick={()=> updateAvailability('busy')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#ef4444', marginRight:6}} />Busy</button>
-                          <button onClick={()=> updateAvailability('offline')}><span style={{display:'inline-block', width:8, height:8, borderRadius:999, background:'#6b7280', marginRight:6}} />Offline</button>
-                        </div>
-                      )}
-                    </div>
-                    <button className="btn success" onClick={goToSubmitOrder} title="Submit Order" aria-label="Submit Order">Submit Order</button>
-                  </>
+                  <button className="btn success" onClick={goToSubmitOrder} title="Submit Order" aria-label="Submit Order">Submit Order</button>
                 ) : (
                   <button className="btn" onClick={openAssign} title="Submit to Agent" aria-label="Submit to Agent">Submit to Agent</button>
                 )}
