@@ -85,7 +85,7 @@ export default function AgentDashboard(){
   const upcomingPKR = toPKR(upcomingByCur)
 
   return (
-    <div className="grid responsive-grid" style={{gap:12}}>
+    <div className="grid responsive-grid max-w-screen-2xl mx-auto px-3 md:px-6 gap-3 md:gap-4">
       <div className="page-header">
         <div>
           <div className="page-title gradient heading-green">Agent Dashboard</div>
@@ -94,7 +94,7 @@ export default function AgentDashboard(){
       </div>
 
       {/* Top summary cards */}
-      <div className="card-grid">
+      <div className="card-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
         <MetricCard
           title="Assigned Chats"
           value={assignedCount}
@@ -130,10 +130,12 @@ export default function AgentDashboard(){
       </div>
 
       {/* Revenue chart */}
-      <div className="card" style={{display:'grid', gap:12}}>
-        <div style={{display:'flex', alignItems:'center', justifyContent:'space-between'}}>
-          <div style={{display:'flex', alignItems:'center', gap:10}}>
-            <div style={{width:32,height:32,borderRadius:8,background:'linear-gradient(135deg,#3b82f6,#8b5cf6)',display:'grid',placeItems:'center',color:'#fff',fontWeight:800, fontSize:18}}>📈</div>
+      <div className="card shadow-sm" style={{display:'grid', gap:12}}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="grid place-items-center rounded-xl" style={{width:36,height:36,background:'linear-gradient(135deg,#3b82f6,#8b5cf6)',color:'#fff'}} aria-hidden>
+              <UIIcon name="chart" />
+            </div>
             <div>
               <div style={{fontWeight:800}}>Earnings Overview</div>
               <div className="helper">Commission at 8% of order value</div>
@@ -152,19 +154,65 @@ export default function AgentDashboard(){
   )
 }
 
+function UIIcon({ name, className }){
+  const props = { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', className }
+  if (name === 'chat') return (
+    <svg {...props}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+  )
+  if (name === 'receipt') return (
+    <svg {...props}><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10"/><path d="M7 12h10"/><path d="M7 16h6"/></svg>
+  )
+  if (name === 'timer') return (
+    <svg {...props}><circle cx="12" cy="13" r="8"/><path d="M12 9v5l3 2"/><path d="M9 2h6"/></svg>
+  )
+  if (name === 'wallet') return (
+    <svg {...props}><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M16 10h4"/></svg>
+  )
+  if (name === 'box') return (
+    <svg {...props}><path d="M3 7l9-5 9 5v10l-9 5-9-5z"/><path d="M3 7l9 5 9-5"/></svg>
+  )
+  if (name === 'chart') return (
+    <svg {...props}><path d="M3 3v18h18"/><path d="M7 17l4-6 3 4 5-8"/></svg>
+  )
+  // default dot
+  return (<svg {...props}><circle cx="12" cy="12" r="3"/></svg>)
+}
+
+function mapIconKind(icon){
+  const s = String(icon||'')
+  if (s.includes('💬')) return 'chat'
+  if (s.includes('🧾')) return 'receipt'
+  if (s.includes('⏱')) return 'timer'
+  if (s.includes('💰')) return 'wallet'
+  if (s.includes('📦')) return 'box'
+  return 'dot'
+}
+
+function iconBg(kind){
+  switch(kind){
+    case 'chat': return 'linear-gradient(135deg,#06b6d4,#6366f1)'
+    case 'receipt': return 'linear-gradient(135deg,#d946ef,#8b5cf6)'
+    case 'timer': return 'linear-gradient(135deg,#f97316,#fb7185)'
+    case 'wallet': return 'linear-gradient(135deg,#22c55e,#0ea5e9)'
+    case 'box': return 'linear-gradient(135deg,#f59e0b,#ef4444)'
+    default: return 'linear-gradient(135deg,#64748b,#94a3b8)'
+  }
+}
+
 function MetricCard({ title, value, hint, icon, actionLabel, onAction }){
+  const kind = mapIconKind(icon)
   return (
-    <div className="card" style={{display:'flex', alignItems:'center', gap:14}}>
-      <div style={{width:42, height:42, borderRadius:999, background:'var(--panel-2)', display:'grid', placeItems:'center', fontSize:20, flexShrink:0}}>
-        {icon}
+    <div className="card flex items-center gap-4 hover:shadow-md transition-shadow">
+      <div className="grid place-items-center" style={{width:42, height:42, borderRadius:12, background: iconBg(kind), color:'#fff'}} aria-hidden>
+        <UIIcon name={kind} />
       </div>
-      <div style={{display:'grid', gap:2}}>
+      <div className="grid gap-0.5">
         <div className="label" style={{fontSize:13}}>{title}</div>
         <div style={{fontSize:20, fontWeight:800}}>{value}</div>
         {hint && <div className="helper" style={{fontSize:11}}>{hint}</div>}
       </div>
       {actionLabel && onAction && (
-        <div style={{marginLeft:'auto'}}>
+        <div className="ml-auto">
           <button className="btn secondary small" onClick={onAction}>{actionLabel}</button>
         </div>
       )}
@@ -175,12 +223,12 @@ function MetricCard({ title, value, hint, icon, actionLabel, onAction }){
 function MiniBarChart({ items }){
   const max = Math.max(1, ...items.map(i=>i.value||0))
   return (
-    <div style={{display:'grid', gap:12}}>
-      <div style={{display:'grid', gridTemplateColumns:`repeat(${items.length}, 1fr)`, gap:16, alignItems:'end', height:180, background:'var(--panel-2)', padding:'12px', borderRadius:8}}>
+    <div className="grid gap-3">
+      <div className="grid items-end rounded-lg" style={{gridTemplateColumns:`repeat(${items.length}, 1fr)`, gap:16, height:180, background:'var(--panel-2)', padding:'12px'}}>
         {items.map((it,idx)=>{
           const h = Math.max(6, Math.round((it.value||0)/max*160))
           return (
-            <div key={idx} style={{display:'grid', alignContent:'end', justifyItems:'center', gap:8}}>
+            <div key={idx} className="grid content-end justify-items-center gap-2">
               <div style={{width:'80%', height:h, background:it.color, borderRadius:6, transition:'transform 150ms ease', cursor:'pointer'}} title={`${it.label}: ${formatCurrency(it.value||0)}`}
                 onMouseOver={e => e.currentTarget.style.transform = 'scale(1.05)'}
                 onMouseOut={e => e.currentTarget.style.transform = 'scale(1)'}
@@ -189,8 +237,8 @@ function MiniBarChart({ items }){
           )
         })}
       </div>
-      <div style={{display:'flex', justifyContent:'center', gap:16, flexWrap:'wrap'}}>
-        {items.map((it,idx)=>(<div key={idx} style={{display:'flex', alignItems:'center', gap:8, fontSize:12}}>
+      <div className="flex justify-center gap-4 flex-wrap">
+        {items.map((it,idx)=>(<div key={idx} className="flex items-center gap-2 text-xs">
             <div style={{width:12, height:12, borderRadius:4, background:it.color}}></div>
             <div>{it.label}: <strong style={{color:'var(--fg)'}}>{formatCurrency(it.value||0)}</strong></div>
           </div>))}
