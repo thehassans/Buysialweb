@@ -176,10 +176,10 @@ export default function UserLayout(){
     setTimeout(()=>{ try{ window.location.assign('/login') }catch{} }, 30)
   }
   return (
-    <div>
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)]">
       <Sidebar closed={closed} links={links} onToggle={()=>setClosed(c=>!c)} />
       <div className={`main ${closed ? 'full' : ''}`}>
-        <div className="topbar" style={{background:'var(--sidebar-bg)', borderBottom:'1px solid var(--sidebar-border)'}}>
+        <div className="topbar shadow-sm backdrop-blur supports-[backdrop-filter]:bg-opacity-90" style={{background:'var(--sidebar-bg)', borderBottom:'1px solid var(--sidebar-border)'}}>
           <div style={{display:'flex', alignItems:'center', gap:12}}>
             {/* Always-visible hamburger + logo */}
             <button
@@ -253,7 +253,7 @@ export default function UserLayout(){
             </button>
           </div>
         </div>
-        <div className={`container ${location.pathname.includes('/inbox/whatsapp') ? 'edge-to-edge' : ''} ${isMobile ? 'with-mobile-tabs' : ''}`}>
+        <div className={`container ${location.pathname.includes('/inbox/whatsapp') ? 'edge-to-edge' : ''} ${isMobile ? 'with-mobile-tabs' : ''} max-w-screen-2xl mx-auto px-3 md:px-6`}>
           <Outlet />
         </div>
         {/* Mobile bottom tabs */}

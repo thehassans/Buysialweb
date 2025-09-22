@@ -13,16 +13,24 @@ export default function Modal({ title, open, onClose, children, footer }){
     }
   }, [])
   return createPortal(
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e)=>e.stopPropagation()}>
-        <div className="header">
-          <h3>{title}</h3>
+    <div
+      className="fixed inset-0 z-[2400] bg-black/40 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-2xl rounded-xl border border-[var(--border)] bg-[var(--panel)] shadow-[var(--shadow-md)]"
+        onClick={(e)=>e.stopPropagation()}
+      >
+        <div className="header flex items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3 bg-[var(--panel-2)] rounded-t-xl">
+          <h3 className="font-extrabold text-lg">{title}</h3>
           <button className="btn secondary" onClick={onClose}>Close</button>
         </div>
-        <div style={{padding:'8px 0'}}>
+        <div className="px-4 py-3">
           {children}
         </div>
-        <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
+        <div className="flex justify-end gap-2 px-4 py-3">
           {footer}
         </div>
       </div>

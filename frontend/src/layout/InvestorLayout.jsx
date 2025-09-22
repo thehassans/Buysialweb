@@ -42,10 +42,10 @@ export default function InvestorLayout(){
   }
 
   return (
-    <div>
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)]">
       <div className={`main ${hideSidebar ? 'full-mobile' : (closed ? 'full' : '')} ${tabsVisible ? 'with-mobile-tabs' : ''}`}>
         {!isMobile && (
-        <div className="topbar" style={{background:'var(--sidebar-bg)', borderBottom:'1px solid var(--sidebar-border)'}}>
+        <div className="topbar shadow-sm backdrop-blur supports-[backdrop-filter]:bg-opacity-90" style={{background:'var(--sidebar-bg)', borderBottom:'1px solid var(--sidebar-border)'}}>
           <div style={{display:'flex', alignItems:'center', gap:12, minHeight:48}}>
             <button
               className="btn secondary"
@@ -81,7 +81,7 @@ export default function InvestorLayout(){
           </div>
         </div>
         )}
-        <div className={`container ${location.pathname.includes('/inbox/whatsapp') ? 'edge-to-edge' : ''}`}>
+        <div className={`container ${location.pathname.includes('/inbox/whatsapp') ? 'edge-to-edge' : ''} max-w-screen-2xl mx-auto px-3 md:px-6`}>
           <Outlet />
         </div>
       </div>

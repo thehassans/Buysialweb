@@ -81,10 +81,10 @@ export default function AdminLayout(){
     return ()=>{ cancelled=true }
   },[])
   return (
-    <div>
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)]">
       <Sidebar closed={closed} links={links} onToggle={()=>setClosed(c=>!c)} />
       <div className={`main ${closed ? 'full' : ''}`}>
-        <div className="topbar" style={{
+        <div className="topbar shadow-sm backdrop-blur supports-[backdrop-filter]:bg-opacity-90" style={{
           background:'var(--sidebar-bg)',
           borderBottom:'1px solid var(--sidebar-border)',
           position:'sticky', top:0, zIndex:1000,
@@ -146,7 +146,7 @@ export default function AdminLayout(){
             </button>
           </div>
         </div>
-        <div className={`container ${isMobile ? 'with-mobile-tabs' : ''}`}>
+        <div className={`container ${isMobile ? 'with-mobile-tabs' : ''} max-w-screen-2xl mx-auto px-3 md:px-6`}>
           <Outlet />
         </div>
         {/* Mobile bottom tabs */}
